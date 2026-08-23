@@ -1,0 +1,37 @@
+[package]
+name = "wd-receiver"
+description = "Linux wireless display receiver (companion protocol)"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "wireless-display"
+path = "src/main.rs"
+
+[dependencies]
+wd-protocol = { path = "../wd-protocol", features = ["async"] }
+gtk = { package = "gtk4", version = "0.11" }
+adw = { package = "libadwaita", version = "0.9", features = ["v1_5"] }
+gstreamer = "0.25"
+tokio.workspace = true
+serde.workspace = true
+serde_json = "1"
+thiserror.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+rcgen.workspace = true
+spake2.workspace = true
+mdns-sd.workspace = true
+ring = { version = "0.17", default-features = false, features = ["std"] }
+sha2.workspace = true
+hex.workspace = true
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+toml = "1"
+dirs = "6"
+if-addrs = "0.15"
+async-channel = "2"
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,17 @@
+[package]
+name = "wd-protocol"
+description = "Wireless Display companion protocol types (transport-independent)"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+serde.workspace = true
+postcard.workspace = true
+sha2.workspace = true
+hex.workspace = true
+thiserror.workspace = true
+tokio = { workspace = true, optional = true }
+
+[features]
+default = []
+async = ["dep:tokio"]

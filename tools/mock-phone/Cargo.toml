@@ -1,0 +1,23 @@
+[package]
+name = "mock-phone"
+description = "CLI stand-in for the Android companion app (discover/pair/connect)"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "mock-phone"
+path = "src/main.rs"
+
+[dependencies]
+wd-protocol = { path = "../../crates/wd-protocol", features = ["async"] }
+tokio.workspace = true
+anyhow.workspace = true
+quinn.workspace = true
+rustls.workspace = true
+spake2.workspace = true
+mdns-sd.workspace = true
+sha2.workspace = true
+hex.workspace = true
+serde.workspace = true
+serde_json = "1"
+dirs = "6"

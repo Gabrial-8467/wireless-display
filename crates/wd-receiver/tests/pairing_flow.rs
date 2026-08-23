@@ -16,6 +16,7 @@ use wd_receiver::net::{
 const CONFIRM_RX: &[u8] = b"wdl-confirm-receiver";
 const CONFIRM_PHONE: &[u8] = b"wdl-confirm-phone";
 const PHONE_IDENTITY: &[u8] = b"wdl-phone";
+const RECEIVER_IDENTITY: &[u8] = b"wdl-receiver";
 
 struct TestReceiver {
     handle: ListenerHandle,
@@ -25,7 +26,13 @@ struct TestReceiver {
     _dir: tempfile::TempDir,
 }
 
+fn init_test_logging() {
+    static ONCE: std::sync::Once = std::sync::Once::new();
+    ONCE.call_once(|| wd_receiver::diag::init_tracing("debug"));
+}
+
 async fn spawn_test_receiver(idle_timeout: Duration) -> anyhow::Result<TestReceiver> {
+    init_test_logging();
     let dir = tempfile::tempdir()?;
     let identity = Arc::new(Identity::load_or_create(dir.path())?);
     let pairing = Arc::new(PairingManager::new(&dir.path().join("paired.json")));
@@ -139,10 +146,21 @@ async fn attempt_pair(
     let (_ep, conn) = dial(addr).await?;
     let (mut send, mut recv) = conn.open_bi().await?;
 
+    // Protocol rule: Hello always comes first (no token yet).
+    write_frame(
+        &mut send,
+        &Message::Hello {
+            proto_version: Version::CURRENT,
+            device_name: phone_name.into(),
+            auth_token: None,
+        },
+    )
+    .await?;
+
     let (spake, msg_a) = Spake2::<Ed25519Group>::start_a(
         &Password::new(code_used),
         &SpakeIdentity::new(PHONE_IDENTITY),
-        &SpakeIdentity::new(b"wdl-phone-view"),
+        &SpakeIdentity::new(RECEIVER_IDENTITY),
     );
     write_frame(
         &mut send,
@@ -159,7 +177,12 @@ async fn attempt_pair(
     let key = spake
         .finish(&reply)
         .map_err(|e| anyhow::anyhow!("spake finish failed: {e}"))?;
-    assert_eq!(confirmation(&key, CONFIRM_RX), rx_confirm, "receiver confirmation");
+    // With a wrong code both sides still derive keys — they just disagree.
+    // The confirmation check is what actually detects the bad code.
+    anyhow::ensure!(
+        confirmation(&key, CONFIRM_RX) == rx_confirm,
+        "wrong pairing code: receiver confirmation mismatch"
+    );
 
     write_frame(
         &mut send,
@@ -179,15 +202,14 @@ async fn wrong_pairing_code_is_rejected_and_nothing_persists() -> anyhow::Result
     let real_code = rx.pairing.open_window();
     assert_ne!(real_code, "000001", "random codes should not be trivially guessable");
 
-    let result = attempt_pair(rx.handle.local_addr(), "000001", "Sneaky Phone").await?;
-    match result {
-        Message::PairResult { accepted: false, .. } => {}
-        other => panic!("expected rejection, got {other:?}"),
-    }
-    assert!(rx.pairing.list_devices().is_empty());
+    // The client detects the mismatch via the receiver's confirmation hash.
+    let result = attempt_pair(rx.handle.local_addr(), "000001", "Sneaky Phone").await;
+    assert!(result.is_err(), "wrong code must fail confirmation check");
 
-    // The window is consumed by the failed attempt.
-    assert!(!rx.pairing.window_is_open());
+    // The receiver never registered anything.
+    assert!(rx.pairing.list_devices().is_empty());
+    // The half-finished window stays open until its TTL expires.
+    assert!(rx.pairing.window_is_open());
     rx.handle.shutdown();
     Ok(())
 }

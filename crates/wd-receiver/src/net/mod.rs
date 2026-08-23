@@ -30,7 +30,10 @@ pub fn rustls_crypto_provider() -> &'static Arc<rustls::crypto::CryptoProvider> 
             return existing.clone();
         }
         let provider = Arc::new(rustls::crypto::ring::default_provider());
-        let _ = rustls::crypto::CryptoProvider::install_default(provider.clone());
+        // install_default takes the inner value; keep our own Arc for callers.
+        let _ = rustls::crypto::CryptoProvider::install_default(
+            rustls::crypto::ring::default_provider(),
+        );
         provider
     })
 }

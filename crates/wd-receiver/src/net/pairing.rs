@@ -12,6 +12,7 @@ pub const PAIRING_CODE_TTL_SECS: u64 = 120;
 const CONFIRM_RX: &[u8] = b"wdl-confirm-receiver";
 const CONFIRM_PHONE: &[u8] = b"wdl-confirm-phone";
 const PHONE_IDENTITY: &[u8] = b"wdl-phone";
+const RECEIVER_IDENTITY: &[u8] = b"wdl-receiver";
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct PairedDevice {
@@ -156,11 +157,10 @@ impl PairingManager {
             return Err(PairingError::OutOfOrder);
         }
 
-        let receiver_id = SpakeIdentity::new(receiver_fingerprint.as_bytes());
         let (spake, reply) = Spake2::<Ed25519Group>::start_b(
             &Password::new(&state.code),
             &SpakeIdentity::new(PHONE_IDENTITY),
-            &receiver_id,
+            &SpakeIdentity::new(RECEIVER_IDENTITY),
         );
         // The receiver already holds the phone's first message, so it can
         // finish its half of the exchange immediately.

@@ -163,6 +163,9 @@ async fn handle_connection(
         Ok(conn) => {
             tracing::info!(peer = %conn.remote_address(), "QUIC connection established");
             run_session(&conn, ctx).await;
+            // Grace period so final frames (rejections, bye acks) are
+            // delivered before the connection is torn down.
+            tokio::time::sleep(Duration::from_millis(100)).await;
         }
         Err(e) => tracing::warn!(error = %e, "QUIC handshake failed"),
     }
@@ -209,7 +212,7 @@ async fn establish_and_serve(conn: &quinn::Connection, ctx: &NetContext) -> Sess
         Err(e) => return SessionOutcome::Lost(format!("control stream failed: {e}")),
     };
 
-    let (proto_version, _device_name, auth_token) = match read_frame(&mut recv).await {
+    let (proto_version, _hello_name, auth_token) = match read_frame(&mut recv).await {
         Ok(Message::Hello { proto_version, device_name, auth_token }) => {
             (proto_version, device_name, auth_token)
         }
@@ -240,7 +243,13 @@ async fn establish_and_serve(conn: &quinn::Connection, ctx: &NetContext) -> Sess
         return SessionOutcome::Clean(format!("incompatible protocol version {proto_version}"));
     }
 
-    let Some(device) = auth_token.as_deref().and_then(|t| ctx.pairing.find_by_token(t)) else {
+    // Protocol rule: the first message on the control stream is always
+    // Hello. A valid token authenticates; anything else falls into the
+    // pairing sub-flow on the same stream (or is refused cleanly).
+    let known = auth_token
+        .as_deref()
+        .and_then(|t| ctx.pairing.find_by_token(t));
+    let Some(device) = known else {
         return pairing_flow(ctx, &mut send, &mut recv).await;
     };
 
@@ -278,7 +287,14 @@ async fn pairing_flow(
         outcome: None,
     };
 
-    let (phone_name, spake_message) = match read_frame(recv).await {
+    if !ctx.pairing.window_is_open() {
+        let reason: String =
+            "not paired and no pairing window is open on the computer".into();
+        let _ = write_frame(send, &reject(reason.clone())).await;
+        return SessionOutcome::Clean(reason);
+    }
+
+    let (device_name, spake_message) = match read_frame(recv).await {
         Ok(Message::PairBegin { device_name, spake_message }) => (device_name, spake_message),
         Ok(other) => {
             let reason = format!("expected PairBegin, got {}", kind_of(&other));
@@ -295,7 +311,7 @@ async fn pairing_flow(
     }
 
     let fingerprint = ctx.identity.fingerprint_hex().to_string();
-    let outcome = match ctx.pairing.handle_pair_begin(&phone_name, &spake_message, fingerprint) {
+    let outcome = match ctx.pairing.handle_pair_begin(&device_name, &spake_message, fingerprint) {
         Ok(o) => o,
         Err(e) => {
             let reason = format!("pairing rejected: {e}");
@@ -348,7 +364,26 @@ async fn pairing_flow(
                     name: device.name.clone(),
                 })
                 .await;
-            SessionOutcome::Clean(format!("paired with {}", device.name))
+
+            // The phone can continue on this same connection immediately.
+            let _ = ctx.session.transition(SessionState::Negotiating);
+            ctx.session.set_peer(device.name.clone());
+            let _ = ctx
+                .events_tx
+                .send(ListenerEvent::Connected { name: device.name.clone() })
+                .await;
+            if let Err(e) = write_frame(
+                send,
+                &Message::HelloAck {
+                    proto_version: Version::CURRENT,
+                    receiver_name: ctx.identity.host_name().to_string(),
+                },
+            )
+            .await
+            {
+                return SessionOutcome::Lost(format!("failed to send HelloAck: {e}"));
+            }
+            serve_control_loop(send, recv, ctx).await
         }
         Err(e) => {
             let reason = format!("pairing rejected: {e}");
@@ -368,8 +403,10 @@ async fn serve_control_loop(
         let frame = tokio::time::timeout(ctx.idle_timeout, read_frame(recv)).await;
         match frame {
             Err(_elapsed) => return SessionOutcome::Lost("idle timeout".into()),
+            // A FIN without an explicit Bye means the client vanished
+            // (crash, network drop, force-kill).
             Ok(Err(CodecError::UnexpectedEof)) => {
-                return SessionOutcome::Clean("client closed control stream".into());
+                return SessionOutcome::Lost("client closed connection without goodbye".into());
             }
             Ok(Err(e)) => return SessionOutcome::Lost(format!("control stream error: {e}")),
             Ok(Ok(message)) => match message {

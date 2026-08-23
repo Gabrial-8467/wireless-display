@@ -14,6 +14,7 @@ pub const SERVICE_TYPE: &str = "_wdlink._udp.local.";
 const CONFIRM_RX: &[u8] = b"wdl-confirm-receiver";
 const CONFIRM_PHONE: &[u8] = b"wdl-confirm-phone";
 const PHONE_IDENTITY: &[u8] = b"wdl-phone";
+const RECEIVER_IDENTITY: &[u8] = b"wdl-receiver";
 
 /// Accepts any server certificate; the pairing code itself is the security
 /// anchor (SPAKE2), and users verify the fingerprint out of band.
@@ -108,14 +109,25 @@ pub async fn pair_with_receiver(
     phone_name: &str,
     code: &str,
 ) -> anyhow::Result<PairingOutcomeInfo> {
-    let fingerprint_for_ids = b"wdl-phone-view".to_vec();
+    let (mut send, mut recv) = conn.open_bi().await.context("open control stream")?;
+
+    // Protocol rule: Hello always comes first (no token during pairing).
+    write_frame(
+        &mut send,
+        &Message::Hello {
+            proto_version: Version::CURRENT,
+            device_name: phone_name.into(),
+            auth_token: None,
+        },
+    )
+    .await?;
+
     let (spake, msg_a) = Spake2::<Ed25519Group>::start_a(
         &Password::new(code),
         &SpakeIdentity::new(PHONE_IDENTITY),
-        &SpakeIdentity::new(&fingerprint_for_ids),
+        &SpakeIdentity::new(RECEIVER_IDENTITY),
     );
 
-    let (mut send, mut recv) = conn.open_bi().await.context("open control stream")?;
     write_frame(
         &mut send,
         &Message::PairBegin {
@@ -153,7 +165,13 @@ pub async fn pair_with_receiver(
     .await?;
 
     match read_frame(&mut recv).await? {
-        Message::PairResult { accepted: true, outcome: Some(outcome), .. } => Ok(outcome),
+        Message::PairResult { accepted: true, outcome: Some(outcome), .. } => {
+            // Receiver follows success with HelloAck; consume it to confirm.
+            match read_frame(&mut recv).await? {
+                Message::HelloAck { .. } => Ok(outcome),
+                other => anyhow::bail!("expected HelloAck after pairing, got {:?}", kind_of(&other)),
+            }
+        }
         Message::PairResult { accepted: false, reason, .. } => anyhow::bail!(
             "receiver refused pairing: {}",
             reason.unwrap_or_else(|| "unknown reason".into())

@@ -40,4 +40,4 @@ abstraction for future built-in-cast protocols.
 |---|---|---|
 | ADR-001 | Companion app primary; Miracast deferred behind `DisplayProtocol` trait | **Approved** |
 | ADR-002 | GStreamer for media pipelines; `gtk4paintablesink` render; `pipewiresink` audio | Approved (Phase 0) |
-| ADR-003 | QUIC (quinn) transport w/ UDP-AEAD fallback path on Android side | Approved — benchmark in Phase 2 |
+| ADR-003 | QUIC datagrams (RFC 9221) carry RTP media; UDP+AEAD variant benchmarked in Phase 5 | Implemented Phase 3 |

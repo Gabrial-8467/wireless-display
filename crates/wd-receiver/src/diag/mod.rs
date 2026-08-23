@@ -15,7 +15,7 @@ pub fn init_tracing(level: &str) {
         .init();
 }
 
-const DECODER_CANDIDATES: &[&str] = &[
+pub const DECODER_CANDIDATES: &[&str] = &[
     "vaapih264dec",
     "vah264dec",
     "nvh264dec",

@@ -6,9 +6,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use anyhow::Context as _;
 use sha2::Digest;
 use spake2::{Ed25519Group, Identity as SpakeIdentity, Password, Spake2};
-use wd_protocol::{
-    CodecError, Message, PairingOutcomeInfo, Version, read_frame, write_frame,
-};
+use wd_protocol::{CodecError, Message, PairingOutcomeInfo, Version, read_frame, write_frame};
 
 pub const SERVICE_TYPE: &str = "_wdlink._udp.local.";
 const CONFIRM_RX: &[u8] = b"wdl-confirm-receiver";
@@ -165,14 +163,24 @@ pub async fn pair_with_receiver(
     .await?;
 
     match read_frame(&mut recv).await? {
-        Message::PairResult { accepted: true, outcome: Some(outcome), .. } => {
+        Message::PairResult {
+            accepted: true,
+            outcome: Some(outcome),
+            ..
+        } => {
             // Receiver follows success with HelloAck; consume it to confirm.
             match read_frame(&mut recv).await? {
                 Message::HelloAck { .. } => Ok(outcome),
-                other => anyhow::bail!("expected HelloAck after pairing, got {:?}", kind_of(&other)),
+                other => {
+                    anyhow::bail!("expected HelloAck after pairing, got {:?}", kind_of(&other))
+                }
             }
         }
-        Message::PairResult { accepted: false, reason, .. } => anyhow::bail!(
+        Message::PairResult {
+            accepted: false,
+            reason,
+            ..
+        } => anyhow::bail!(
             "receiver refused pairing: {}",
             reason.unwrap_or_else(|| "unknown reason".into())
         ),

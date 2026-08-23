@@ -9,9 +9,7 @@ use sha2::Digest;
 use spake2::{Ed25519Group, Identity as SpakeIdentity, Password, Spake2};
 use tokio::sync::mpsc;
 use wd_protocol::{Message, Version, read_frame, write_frame};
-use wd_receiver::net::{
-    Identity, ListenerEvent, ListenerHandle, NetContext, PairingManager,
-};
+use wd_receiver::net::{Identity, ListenerEvent, ListenerHandle, NetContext, PairingManager};
 
 const CONFIRM_RX: &[u8] = b"wdl-confirm-receiver";
 const CONFIRM_PHONE: &[u8] = b"wdl-confirm-phone";
@@ -164,15 +162,26 @@ async fn attempt_pair(
     );
     write_frame(
         &mut send,
-        &Message::PairBegin { device_name: phone_name.into(), spake_message: msg_a },
+        &Message::PairBegin {
+            device_name: phone_name.into(),
+            spake_message: msg_a,
+        },
     )
     .await?;
 
-    let (reply, rx_confirm) = match read_frame(&mut recv).await? {
-        Message::PairChallenge { spake_reply, receiver_confirmation, .. } => {
-            (spake_reply, receiver_confirmation)
-        }
-        other => panic!("expected PairChallenge, got {other:?}"),
+    // The receiver may refuse immediately (e.g. no window open) without
+    // ever sending a challenge.
+    let first = read_frame(&mut recv)
+        .await
+        .map_err(|e| anyhow::anyhow!("read after PairBegin failed: {e}"))?;
+    let (reply, rx_confirm) = match first {
+        Message::PairResult { .. } => return Ok(first),
+        Message::PairChallenge {
+            spake_reply,
+            receiver_confirmation,
+            ..
+        } => (spake_reply, receiver_confirmation),
+        other => panic!("expected PairChallenge or PairResult, got {other:?}"),
     };
     let key = spake
         .finish(&reply)
@@ -186,21 +195,26 @@ async fn attempt_pair(
 
     write_frame(
         &mut send,
-        &Message::PairVerify { phone_confirmation: confirmation(&key, CONFIRM_PHONE) },
+        &Message::PairVerify {
+            phone_confirmation: confirmation(&key, CONFIRM_PHONE),
+        },
     )
     .await?;
-    Ok(read_frame(&mut recv)
+    read_frame(&mut recv)
         .await
-        .map_err(|e| anyhow::anyhow!("read PairResult failed: {e}"))?)
+        .map_err(|e| anyhow::anyhow!("read PairResult failed: {e}"))
 }
 
 // ---- Tests ----
 
 #[tokio::test]
 async fn wrong_pairing_code_is_rejected_and_nothing_persists() -> anyhow::Result<()> {
-    let mut rx = spawn_test_receiver(Duration::from_secs(5)).await?;
+    let rx = spawn_test_receiver(Duration::from_secs(5)).await?;
     let real_code = rx.pairing.open_window();
-    assert_ne!(real_code, "000001", "random codes should not be trivially guessable");
+    assert_ne!(
+        real_code, "000001",
+        "random codes should not be trivially guessable"
+    );
 
     // The client detects the mismatch via the receiver's confirmation hash.
     let result = attempt_pair(rx.handle.local_addr(), "000001", "Sneaky Phone").await;
@@ -216,10 +230,14 @@ async fn wrong_pairing_code_is_rejected_and_nothing_persists() -> anyhow::Result
 
 #[tokio::test]
 async fn pairing_without_open_window_is_refused_cleanly() -> anyhow::Result<()> {
-    let mut rx = spawn_test_receiver(Duration::from_secs(5)).await?;
+    let rx = spawn_test_receiver(Duration::from_secs(5)).await?;
     let result = attempt_pair(rx.handle.local_addr(), "123456", "Lonely Phone").await?;
     match result {
-        Message::PairResult { accepted: false, reason: Some(reason), .. } => {
+        Message::PairResult {
+            accepted: false,
+            reason: Some(reason),
+            ..
+        } => {
             assert!(reason.contains("no pairing window"), "{reason}");
         }
         other => panic!("expected refusal, got {other:?}"),
@@ -230,13 +248,17 @@ async fn pairing_without_open_window_is_refused_cleanly() -> anyhow::Result<()> 
 
 #[tokio::test]
 async fn successful_pairing_then_token_reconnect_receives_hello_ack() -> anyhow::Result<()> {
-    let mut rx = spawn_test_receiver(Duration::from_secs(5)).await?;
+    let rx = spawn_test_receiver(Duration::from_secs(5)).await?;
     let addr = rx.handle.local_addr();
 
     // Pair for real, capturing the code returned by open_window().
     let code = rx.pairing.open_window();
     let outcome = match attempt_pair(addr, &code, "Integration Phone").await? {
-        Message::PairResult { accepted: true, outcome: Some(o), .. } => o,
+        Message::PairResult {
+            accepted: true,
+            outcome: Some(o),
+            ..
+        } => o,
         other => panic!("pairing should succeed, got {other:?}"),
     };
     assert_eq!(outcome.device_token.len(), 64);
@@ -254,7 +276,10 @@ async fn successful_pairing_then_token_reconnect_receives_hello_ack() -> anyhow:
     )
     .await?;
     match read_frame(&mut recv).await? {
-        Message::HelloAck { proto_version, receiver_name } => {
+        Message::HelloAck {
+            proto_version,
+            receiver_name,
+        } => {
             assert!(Version::CURRENT.compatible_with(proto_version));
             assert!(!receiver_name.is_empty());
         }
@@ -262,7 +287,13 @@ async fn successful_pairing_then_token_reconnect_receives_hello_ack() -> anyhow:
     }
 
     // Graceful goodbye: receiver answers Bye and FSM returns to Idle.
-    write_frame(&mut send, &Message::Bye { reason: "test done".into() }).await?;
+    write_frame(
+        &mut send,
+        &Message::Bye {
+            reason: "test done".into(),
+        },
+    )
+    .await?;
     match read_frame(&mut recv).await {
         Ok(Message::Bye { .. }) | Err(_) => {}
         other => panic!("unexpected reply after bye: {other:?}"),
@@ -274,7 +305,7 @@ async fn successful_pairing_then_token_reconnect_receives_hello_ack() -> anyhow:
 
 #[tokio::test]
 async fn stale_token_is_sent_to_pairing_flow_and_refused_without_window() -> anyhow::Result<()> {
-    let mut rx = spawn_test_receiver(Duration::from_secs(5)).await?;
+    let rx = spawn_test_receiver(Duration::from_secs(5)).await?;
     let (_ep, conn) = dial(rx.handle.local_addr()).await?;
     let (mut send, mut recv) = conn.open_bi().await?;
     write_frame(
@@ -288,7 +319,11 @@ async fn stale_token_is_sent_to_pairing_flow_and_refused_without_window() -> any
     .await?;
     // Unknown token → falls into pairing path → no window open → refusal.
     match read_frame(&mut recv).await? {
-        Message::PairResult { accepted: false, reason: Some(reason), .. } => {
+        Message::PairResult {
+            accepted: false,
+            reason: Some(reason),
+            ..
+        } => {
             assert!(reason.contains("no pairing window"), "{reason}");
         }
         other => panic!("expected pairing refusal, got {other:?}"),
@@ -299,10 +334,14 @@ async fn stale_token_is_sent_to_pairing_flow_and_refused_without_window() -> any
 
 #[tokio::test]
 async fn garbage_after_hello_terminates_connection_without_panic() -> anyhow::Result<()> {
-    let mut rx = spawn_test_receiver(Duration::from_secs(2)).await?;
+    let rx = spawn_test_receiver(Duration::from_secs(2)).await?;
     let code = rx.pairing.open_window();
     let outcome = match attempt_pair(rx.handle.local_addr(), &code, "Fuzz Phone").await? {
-        Message::PairResult { accepted: true, outcome: Some(o), .. } => o,
+        Message::PairResult {
+            accepted: true,
+            outcome: Some(o),
+            ..
+        } => o,
         other => panic!("pairing should succeed, got {other:?}"),
     };
 
@@ -344,7 +383,11 @@ async fn silent_client_hits_idle_timeout_and_disconnect_event_fires() -> anyhow:
     let mut rx = spawn_test_receiver(idle).await?;
     let code = rx.pairing.open_window();
     let outcome = match attempt_pair(rx.handle.local_addr(), &code, "Quiet Phone").await? {
-        Message::PairResult { accepted: true, outcome: Some(o), .. } => o,
+        Message::PairResult {
+            accepted: true,
+            outcome: Some(o),
+            ..
+        } => o,
         other => panic!("pairing should succeed, got {other:?}"),
     };
 
@@ -366,18 +409,19 @@ async fn silent_client_hits_idle_timeout_and_disconnect_event_fires() -> anyhow:
     drop(send);
     drop(conn); // vanish without Bye
 
-    // Expect a Disconnected event (unclean) within ~6× the idle timeout.
-    match recv_event(&mut rx.events, idle * 8).await? {
-        ListenerEvent::Disconnected { clean, reason } => {
-            assert!(!clean, "vanishing client is unclean: {reason}");
+    // Expect a Disconnected event (unclean) within ~8× the idle timeout.
+    loop {
+        match recv_event(&mut rx.events, idle * 8).await? {
+            ListenerEvent::Disconnected { clean, reason } => {
+                assert!(!clean, "vanishing client is unclean: {reason}");
+                break;
+            }
+            ListenerEvent::PairingSucceeded { name, .. } => {
+                assert_eq!(name, "Quiet Phone");
+            }
+            // Connected fires right after successful pairing; keep waiting.
+            ListenerEvent::Connected { name } => assert_eq!(name, "Quiet Phone"),
         }
-        ListenerEvent::PairingSucceeded { name, .. } => {
-            // PairingSucceeded may arrive first from this same connection.
-            assert_eq!(name, "Quiet Phone");
-            let next = recv_event(&mut rx.events, idle * 8).await?;
-            assert!(matches!(next, ListenerEvent::Disconnected { clean: false, .. }));
-        }
-        other => panic!("unexpected event {other:?}"),
     }
     rx.handle.shutdown();
     Ok(())

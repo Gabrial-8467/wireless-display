@@ -12,8 +12,7 @@ async fn main() -> anyhow::Result<()> {
         Some("discover") => discover(timeout_secs(&args)).await,
         Some("pair") => {
             let opts = ConnectOpts::parse(&args)?;
-            let code = opt_value(&args, "--code")
-                .context("pair requires --code <6 digits>")?;
+            let code = opt_value(&args, "--code").context("pair requires --code <6 digits>")?;
             pair(opts, code).await
         }
         Some("run") => {
@@ -95,8 +94,9 @@ fn store_path(dir: &std::path::Path) -> std::path::PathBuf {
 
 async fn discover(timeout: u64) -> anyhow::Result<()> {
     let daemon = mdns_sd::ServiceDaemon::new()?;
-    let receiver =
-        daemon.browse(client::SERVICE_TYPE).context("failed to start mDNS browse")?;
+    let receiver = daemon
+        .browse(client::SERVICE_TYPE)
+        .context("failed to start mDNS browse")?;
     let deadline = tokio::time::Instant::now() + Duration::from_secs(timeout);
     let mut found = 0;
     while let Some(remaining) = deadline.checked_duration_since(tokio::time::Instant::now()) {

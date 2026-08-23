@@ -31,7 +31,10 @@ fn real_main() -> anyhow::Result<()> {
 
     let (config, config_path) = Config::load_or_create()?;
     if let Err(problem) = config::validate(&config) {
-        anyhow::bail!("invalid configuration at {}: {problem}", config_path.display());
+        anyhow::bail!(
+            "invalid configuration at {}: {problem}",
+            config_path.display()
+        );
     }
     crate::diag::init_tracing(&config.general.log_level);
 
@@ -144,7 +147,10 @@ fn bring_up_network(
         let _ = ui_tx.send(UiEvent::KnownDevices(devices)).await;
     });
 
-    Ok(NetworkParts { listener, advertisement })
+    Ok(NetworkParts {
+        listener,
+        advertisement,
+    })
 }
 
 fn spawn_listener_forwarder(

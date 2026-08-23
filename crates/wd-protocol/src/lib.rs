@@ -1,14 +1,16 @@
 mod framing;
 mod messages;
 
-pub use framing::{decode_frame, encode_frame, read_frame, write_frame, CodecError};
+pub use framing::{CodecError, decode_frame, encode_frame, read_frame, write_frame};
 pub use messages::{
-    AudioCodec, AudioOffer, Message, PairingOutcomeInfo, VideoCodec, VideoOffer, MAX_MESSAGE_LEN,
+    AudioCodec, AudioOffer, MAX_MESSAGE_LEN, Message, PairingOutcomeInfo, VideoCodec, VideoOffer,
 };
 
 pub const PROTOCOL_NAME: &str = "WDL";
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize)]
+#[derive(
+    Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, serde::Serialize, serde::Deserialize,
+)]
 pub struct Version {
     pub major: u16,
     pub minor: u16,

@@ -48,10 +48,7 @@ impl NetContext {
 #[derive(Debug, thiserror::Error)]
 pub enum ListenerStartError {
     #[error("failed to start QUIC listener on {addr}: {detail}")]
-    Start {
-        addr: SocketAddr,
-        detail: String,
-    },
+    Start { addr: SocketAddr, detail: String },
 }
 
 pub struct ListenerHandle {
@@ -95,7 +92,10 @@ pub fn start_listener(
         detail,
     };
 
-    let (certs, key) = ctx.identity.tls_material().map_err(|e| fail(e.to_string()))?;
+    let (certs, key) = ctx
+        .identity
+        .tls_material()
+        .map_err(|e| fail(e.to_string()))?;
     super::rustls_crypto_provider();
 
     let mut server_crypto = rustls::ServerConfig::builder()
@@ -104,11 +104,13 @@ pub fn start_listener(
         .map_err(|e| fail(format!("invalid receiver identity: {e}")))?;
     server_crypto.alpn_protocols = vec![b"wdl/1".to_vec()];
 
-    let quic_config =
-        quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
-            .map_err(|e| fail(format!("quic config rejected identity: {e}")))?;
-    let endpoint = quinn::Endpoint::server(quinn::ServerConfig::with_crypto(Arc::new(quic_config)), bind_addr)
-        .map_err(|e| fail(e.to_string()))?;
+    let quic_config = quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
+        .map_err(|e| fail(format!("quic config rejected identity: {e}")))?;
+    let endpoint = quinn::Endpoint::server(
+        quinn::ServerConfig::with_crypto(Arc::new(quic_config)),
+        bind_addr,
+    )
+    .map_err(|e| fail(e.to_string()))?;
     let local_addr = super::endpoint_local_addr(&endpoint);
     tracing::info!(%local_addr, "QUIC listener ready");
 
@@ -213,9 +215,11 @@ async fn establish_and_serve(conn: &quinn::Connection, ctx: &NetContext) -> Sess
     };
 
     let (proto_version, _hello_name, auth_token) = match read_frame(&mut recv).await {
-        Ok(Message::Hello { proto_version, device_name, auth_token }) => {
-            (proto_version, device_name, auth_token)
-        }
+        Ok(Message::Hello {
+            proto_version,
+            device_name,
+            auth_token,
+        }) => (proto_version, device_name, auth_token),
         Ok(other) => {
             let _ = write_frame(
                 &mut send,
@@ -258,7 +262,9 @@ async fn establish_and_serve(conn: &quinn::Connection, ctx: &NetContext) -> Sess
     ctx.session.set_peer(device.name.clone());
     let _ = ctx
         .events_tx
-        .send(ListenerEvent::Connected { name: device.name.clone() })
+        .send(ListenerEvent::Connected {
+            name: device.name.clone(),
+        })
         .await;
 
     if let Err(e) = write_frame(
@@ -288,14 +294,16 @@ async fn pairing_flow(
     };
 
     if !ctx.pairing.window_is_open() {
-        let reason: String =
-            "not paired and no pairing window is open on the computer".into();
+        let reason: String = "not paired and no pairing window is open on the computer".into();
         let _ = write_frame(send, &reject(reason.clone())).await;
         return SessionOutcome::Clean(reason);
     }
 
     let (device_name, spake_message) = match read_frame(recv).await {
-        Ok(Message::PairBegin { device_name, spake_message }) => (device_name, spake_message),
+        Ok(Message::PairBegin {
+            device_name,
+            spake_message,
+        }) => (device_name, spake_message),
         Ok(other) => {
             let reason = format!("expected PairBegin, got {}", kind_of(&other));
             let _ = write_frame(send, &reject(reason.clone())).await;
@@ -311,7 +319,10 @@ async fn pairing_flow(
     }
 
     let fingerprint = ctx.identity.fingerprint_hex().to_string();
-    let outcome = match ctx.pairing.handle_pair_begin(&device_name, &spake_message, fingerprint) {
+    let outcome = match ctx
+        .pairing
+        .handle_pair_begin(&device_name, &spake_message, fingerprint)
+    {
         Ok(o) => o,
         Err(e) => {
             let reason = format!("pairing rejected: {e}");
@@ -370,7 +381,9 @@ async fn pairing_flow(
             ctx.session.set_peer(device.name.clone());
             let _ = ctx
                 .events_tx
-                .send(ListenerEvent::Connected { name: device.name.clone() })
+                .send(ListenerEvent::Connected {
+                    name: device.name.clone(),
+                })
                 .await;
             if let Err(e) = write_frame(
                 send,
@@ -411,15 +424,30 @@ async fn serve_control_loop(
             Ok(Err(e)) => return SessionOutcome::Lost(format!("control stream error: {e}")),
             Ok(Ok(message)) => match message {
                 Message::Ping { sender_time_ms } => {
-                    if let Err(e) =
-                        write_frame(send, &Message::Pong { echoed_time_ms: sender_time_ms }).await
+                    if let Err(e) = write_frame(
+                        send,
+                        &Message::Pong {
+                            echoed_time_ms: sender_time_ms,
+                        },
+                    )
+                    .await
                     {
                         return SessionOutcome::Lost(format!("failed to pong: {e}"));
                     }
                 }
-                Message::ClockSync { t1, t2: _, t3: _, t4 } => {
+                Message::ClockSync {
+                    t1,
+                    t2: _,
+                    t3: _,
+                    t4,
+                } => {
                     let now = unix_millis();
-                    let reply = Message::ClockSync { t1, t2: now, t3: now, t4 };
+                    let reply = Message::ClockSync {
+                        t1,
+                        t2: now,
+                        t3: now,
+                        t4,
+                    };
                     if let Err(e) = write_frame(send, &reply).await {
                         return SessionOutcome::Lost(format!("clock sync reply failed: {e}"));
                     }
@@ -447,14 +475,22 @@ async fn serve_control_loop(
                 Message::Bye { reason } => {
                     let _ = write_frame(
                         send,
-                        &Message::Bye { reason: format!("bye acknowledged: {reason}") },
+                        &Message::Bye {
+                            reason: format!("bye acknowledged: {reason}"),
+                        },
                     )
                     .await;
                     return SessionOutcome::Clean(format!("client said bye: {reason}"));
                 }
                 other => {
                     let kind = kind_of(&other);
-                    let _ = write_frame(send, &Message::Bye { reason: format!("unexpected message {kind}") }).await;
+                    let _ = write_frame(
+                        send,
+                        &Message::Bye {
+                            reason: format!("unexpected message {kind}"),
+                        },
+                    )
+                    .await;
                     return SessionOutcome::Clean(format!("unexpected message {kind} after auth"));
                 }
             },

@@ -53,7 +53,11 @@ impl AppState {
     /// Opens a fresh pairing window and publishes the code to the UI.
     pub fn start_pairing(&self) -> String {
         let code = self.pairing.open_window();
-        if self.ui_tx.try_send(UiEvent::PairingPrompt { code: code.clone() }).is_err() {
+        if self
+            .ui_tx
+            .try_send(UiEvent::PairingPrompt { code: code.clone() })
+            .is_err()
+        {
             tracing::warn!("no UI attached; pairing window still open for 120s");
         }
         code

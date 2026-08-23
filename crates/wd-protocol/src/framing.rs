@@ -3,8 +3,8 @@ use std::io;
 #[cfg(feature = "async")]
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
-use crate::messages::MAX_MESSAGE_LEN;
 use crate::Message;
+use crate::messages::MAX_MESSAGE_LEN;
 
 #[derive(Debug, thiserror::Error)]
 pub enum CodecError {
@@ -42,7 +42,10 @@ pub fn decode_frame(frame: &[u8]) -> Result<Message, CodecError> {
     }
     let payload = &frame[4..];
     if declared != payload.len() {
-        return Err(CodecError::LengthMismatch { declared, actual: payload.len() });
+        return Err(CodecError::LengthMismatch {
+            declared,
+            actual: payload.len(),
+        });
     }
     validate_and_decode(payload)
 }
@@ -50,7 +53,9 @@ pub fn decode_frame(frame: &[u8]) -> Result<Message, CodecError> {
 fn validate_and_decode(payload: &[u8]) -> Result<Message, CodecError> {
     let message: Message =
         postcard::from_bytes(payload).map_err(|e| CodecError::Decode(e.to_string()))?;
-    message.validate().map_err(|reason| CodecError::Decode(reason.to_string()))?;
+    message
+        .validate()
+        .map_err(|reason| CodecError::Decode(reason.to_string()))?;
     Ok(message)
 }
 
@@ -77,7 +82,9 @@ where
     let mut header = [0u8; 4];
     match source.read_exact(&mut header).await {
         Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Err(CodecError::UnexpectedEof),
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+            return Err(CodecError::UnexpectedEof);
+        }
         Err(e) => return Err(CodecError::Io(io::Error::other(e.to_string()))),
     }
     let declared = u32::from_le_bytes(header) as usize;
@@ -87,7 +94,9 @@ where
     let mut payload = vec![0u8; declared];
     match source.read_exact(&mut payload).await {
         Ok(_) => {}
-        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => return Err(CodecError::UnexpectedEof),
+        Err(e) if e.kind() == io::ErrorKind::UnexpectedEof => {
+            return Err(CodecError::UnexpectedEof);
+        }
         Err(e) => return Err(CodecError::Io(io::Error::other(e.to_string()))),
     }
     validate_and_decode(&payload)
@@ -106,14 +115,22 @@ mod tests {
                 device_name: "Test Phone".into(),
                 auth_token: Some(hex::encode([7u8; 32])),
             },
-            Message::HelloAck { proto_version: crate::Version::CURRENT, receiver_name: "fedora".into() },
-            Message::PairBegin { device_name: "Phone".into(), spake_message: vec![1u8; 65] },
+            Message::HelloAck {
+                proto_version: crate::Version::CURRENT,
+                receiver_name: "fedora".into(),
+            },
+            Message::PairBegin {
+                device_name: "Phone".into(),
+                spake_message: vec![1u8; 65],
+            },
             Message::PairChallenge {
                 spake_reply: vec![2u8; 65],
                 receiver_fingerprint: "ab".repeat(32),
                 receiver_confirmation: [9u8; 32],
             },
-            Message::PairVerify { phone_confirmation: [3u8; 32] },
+            Message::PairVerify {
+                phone_confirmation: [3u8; 32],
+            },
             Message::PairResult {
                 accepted: true,
                 reason: None,
@@ -123,16 +140,41 @@ mod tests {
                 }),
             },
             Message::SessionOffer {
-                video: VideoOffer { codec: VideoCodec::H264Baseline, width: 1920, height: 1080, fps: 60, bitrate_kbps: 8000 },
-                audio: AudioOffer { codec: AudioCodec::Opus, sample_rate: 48000, channels: 2 },
+                video: VideoOffer {
+                    codec: VideoCodec::H264Baseline,
+                    width: 1920,
+                    height: 1080,
+                    fps: 60,
+                    bitrate_kbps: 8000,
+                },
+                audio: AudioOffer {
+                    codec: AudioCodec::Opus,
+                    sample_rate: 48000,
+                    channels: 2,
+                },
             },
-            Message::SessionAnswer { accepted: false, reason: Some("resolution too large".into()), max_video_bitrate_kbps: 25000 },
+            Message::SessionAnswer {
+                accepted: false,
+                reason: Some("resolution too large".into()),
+                max_video_bitrate_kbps: 25000,
+            },
             Message::KeyframeRequest,
             Message::BitrateHint { video_kbps: 5000 },
-            Message::ClockSync { t1: 1, t2: 2, t3: 3, t4: 4 },
-            Message::Ping { sender_time_ms: 123456 },
-            Message::Pong { echoed_time_ms: 123456 },
-            Message::Bye { reason: "user closed app".into() },
+            Message::ClockSync {
+                t1: 1,
+                t2: 2,
+                t3: 3,
+                t4: 4,
+            },
+            Message::Ping {
+                sender_time_ms: 123456,
+            },
+            Message::Pong {
+                echoed_time_ms: 123456,
+            },
+            Message::Bye {
+                reason: "user closed app".into(),
+            },
         ]
     }
 
@@ -148,7 +190,9 @@ mod tests {
 
     #[test]
     fn oversized_payload_is_rejected_at_encode_and_decode() {
-        let big = Message::Bye { reason: "x".repeat(MAX_MESSAGE_LEN * 2) };
+        let big = Message::Bye {
+            reason: "x".repeat(MAX_MESSAGE_LEN * 2),
+        };
         match encode_frame(&big) {
             Err(e @ CodecError::TooLarge(..)) => assert!(e.to_string().contains("exceeds")),
             other => panic!("expected TooLarge failure, got {other:?}"),

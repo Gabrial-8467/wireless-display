@@ -41,7 +41,11 @@ impl AudioCodec {
 }
 
 fn valid_name(name: &str) -> bool {
-    !name.is_empty() && name.chars().count() <= MAX_NAME_LEN && name.chars().all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '\'' | '(' | ')'))
+    !name.is_empty()
+        && name.chars().count() <= MAX_NAME_LEN
+        && name
+            .chars()
+            .all(|c| c.is_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.' | '\'' | '(' | ')'))
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -127,7 +131,11 @@ pub enum Message {
 impl Message {
     pub fn validate(&self) -> Result<(), &'static str> {
         match self {
-            Self::Hello { device_name, auth_token, .. } => {
+            Self::Hello {
+                device_name,
+                auth_token,
+                ..
+            } => {
                 if !valid_name(device_name) {
                     return Err("invalid device_name");
                 }
@@ -144,7 +152,10 @@ impl Message {
                     Ok(())
                 }
             }
-            Self::PairBegin { device_name, spake_message } => {
+            Self::PairBegin {
+                device_name,
+                spake_message,
+            } => {
                 if !valid_name(device_name) {
                     return Err("invalid device_name");
                 }
@@ -154,19 +165,31 @@ impl Message {
                     Ok(())
                 }
             }
-            Self::PairChallenge { spake_reply, receiver_fingerprint, .. } => {
+            Self::PairChallenge {
+                spake_reply,
+                receiver_fingerprint,
+                ..
+            } => {
                 if spake_reply.len() > MAX_SPAKE_MESSAGE_LEN {
                     return Err("spake_reply too long");
                 }
-                if receiver_fingerprint.len() != 64 || !receiver_fingerprint.chars().all(|c| c.is_ascii_hexdigit()) {
+                if receiver_fingerprint.len() != 64
+                    || !receiver_fingerprint.chars().all(|c| c.is_ascii_hexdigit())
+                {
                     Err("invalid fingerprint")
                 } else {
                     Ok(())
                 }
             }
-            Self::PairResult { reason: Some(r), .. } if r.chars().count() > MAX_REASON_LEN => Err("reason too long"),
-            Self::SessionAnswer { reason: Some(r), .. } if r.chars().count() > MAX_REASON_LEN => Err("reason too long"),
-            Self::Bye { reason } if reason.chars().count() > MAX_REASON_LEN => Err("reason too long"),
+            Self::PairResult {
+                reason: Some(r), ..
+            } if r.chars().count() > MAX_REASON_LEN => Err("reason too long"),
+            Self::SessionAnswer {
+                reason: Some(r), ..
+            } if r.chars().count() > MAX_REASON_LEN => Err("reason too long"),
+            Self::Bye { reason } if reason.chars().count() > MAX_REASON_LEN => {
+                Err("reason too long")
+            }
             _ => Ok(()),
         }
     }

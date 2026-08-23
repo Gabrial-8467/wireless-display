@@ -98,6 +98,12 @@ pub struct SessionHandles {
     pub peer_rx: tokio::sync::watch::Receiver<Option<String>>,
 }
 
+impl Default for SessionManager {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl SessionManager {
     pub fn new() -> Self {
         let (state_tx, _) = tokio::sync::watch::channel(State::Idle);

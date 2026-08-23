@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 pub use identity::Identity;
 pub use listener::{ListenerEvent, ListenerHandle, NetContext, start_listener};
-pub use pairing::{PairingManager, PairedDevice};
+pub use pairing::{PairedDevice, PairingManager};
 
 #[derive(Debug, thiserror::Error)]
 pub enum NetError {

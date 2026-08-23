@@ -25,10 +25,7 @@ pub struct PairedDevice {
 #[derive(Debug)]
 enum PairingStage {
     Waiting,
-    KeyDerived {
-        key: Vec<u8>,
-        device_name: String,
-    },
+    KeyDerived { key: Vec<u8>, device_name: String },
 }
 
 struct ActivePairing {
@@ -90,8 +87,9 @@ impl PairedStore {
     fn persist(&self) {
         let Some(path) = &self.path else { return };
         let list: Vec<&PairedDevice> = self.devices.values().collect();
-        if let Err(e) =
-            serde_json::to_vec(&list).map_err(anyhow::Error::from).and_then(|bytes| {
+        if let Err(e) = serde_json::to_vec(&list)
+            .map_err(anyhow::Error::from)
+            .and_then(|bytes| {
                 let tmp = path.with_extension("tmp");
                 fs::write(&tmp, &bytes).map_err(anyhow::Error::from)?;
                 fs::rename(&tmp, path).map_err(anyhow::Error::from)?;
@@ -164,7 +162,9 @@ impl PairingManager {
         );
         // The receiver already holds the phone's first message, so it can
         // finish its half of the exchange immediately.
-        let key = spake.finish(phone_message).map_err(|_| PairingError::BadCode)?;
+        let key = spake
+            .finish(phone_message)
+            .map_err(|_| PairingError::BadCode)?;
         let receiver_confirmation = confirmation_hash(&key, CONFIRM_RX);
 
         state.stage = PairingStage::KeyDerived {
@@ -186,7 +186,10 @@ impl PairingManager {
     ) -> Result<PairedDevice, PairingError> {
         let mut guard = self.active.lock().expect("pairing lock");
         let state = guard.as_ref().ok_or(PairingError::NoWindow)?;
-        let PairingStage::KeyDerived { key, device_name, .. } = &state.stage else {
+        let PairingStage::KeyDerived {
+            key, device_name, ..
+        } = &state.stage
+        else {
             return Err(PairingError::OutOfOrder);
         };
         if state.expired() {
@@ -212,7 +215,9 @@ impl PairingManager {
         drop(guard);
 
         let mut store = self.store.lock().expect("store lock");
-        store.devices.insert(device.device_id.clone(), device.clone());
+        store
+            .devices
+            .insert(device.device_id.clone(), device.clone());
         store.persist();
         self.close_window();
         tracing::info!(device_id = %device.device_id, name = %device.name, "device paired");
@@ -288,20 +293,17 @@ mod tests {
         PairingManager::new(&dir.join("paired.json"))
     }
 
-    fn begin(mgr: &PairingManager, code_used: &str, fingerprint: String) -> ([u8; 32], Vec<u8>) {
+    fn begin(mgr: &PairingManager, code_used: &str, _fingerprint: String) -> ([u8; 32], Vec<u8>) {
         let (spake, msg_a) = Spake2::<Ed25519Group>::start_a(
             &Password::new(code_used),
             &SpakeIdentity::new(PHONE_IDENTITY),
-            &SpakeIdentity::new(fingerprint.as_bytes()),
+            &SpakeIdentity::new(RECEIVER_IDENTITY),
         );
         let outcome = mgr
-            .handle_pair_begin("Test Phone", &msg_a, fingerprint)
+            .handle_pair_begin("Test Phone", &msg_a, "a".repeat(64))
             .expect("begin accepted");
         let key = spake.finish(&outcome.spake_reply).expect("client finish");
-        (
-            confirmation_hash(&key, CONFIRM_PHONE),
-            outcome.spake_reply,
-        )
+        (confirmation_hash(&key, CONFIRM_PHONE), outcome.spake_reply)
     }
 
     #[test]
@@ -334,7 +336,10 @@ mod tests {
 
         // Persistence across manager restarts:
         let reloaded = PairingManager::new(&dir.path().join("paired.json"));
-        assert_eq!(reloaded.find_by_token(&device.token).unwrap().device_id, device.device_id);
+        assert_eq!(
+            reloaded.find_by_token(&device.token).unwrap().device_id,
+            device.device_id
+        );
         assert_eq!(reloaded.list_devices().len(), 1);
     }
 
@@ -357,7 +362,10 @@ mod tests {
     fn pair_without_open_window_fails() {
         let dir = tempfile::tempdir().unwrap();
         let mgr = manager(dir.path());
-        assert!(mgr.handle_pair_begin("Phone", &[0u8; 32], "c".repeat(64)).is_err());
+        assert!(
+            mgr.handle_pair_begin("Phone", &[0u8; 32], "c".repeat(64))
+                .is_err()
+        );
     }
 
     #[test]
@@ -367,7 +375,7 @@ mod tests {
         mgr.open_window();
         let fp = "d".repeat(64);
         let (_spake, msg_a) = Spake2::<Ed25519Group>::start_a(
-            &Password::new(&mgr_window_code(&mgr)),
+            &Password::new(mgr_window_code(&mgr)),
             &SpakeIdentity::new(PHONE_IDENTITY),
             &SpakeIdentity::new(fp.as_bytes()),
         );

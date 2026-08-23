@@ -87,7 +87,12 @@ fn build_window(app: &adw::Application, state: &Arc<AppState>) -> adw::Applicati
             other => format!("{other:?}"),
         })
         .unwrap_or_else(|| "n/a".into());
-    let port = state.config.lock().expect("config lock").network.listen_port;
+    let port = state
+        .config
+        .lock()
+        .expect("config lock")
+        .network
+        .listen_port;
     let address_line = format!("0.0.0.0:{port} — phones connect here");
 
     let devices_page = DevicesPage::build(

@@ -24,16 +24,12 @@ impl Identity {
         let key_path = dir.join(KEY_FILE);
 
         let (cert_der, key_der) = if cert_path.exists() && key_path.exists() {
-            (
-                fs::read(&cert_path)?,
-                fs::read(&key_path)?,
-            )
+            (fs::read(&cert_path)?, fs::read(&key_path)?)
         } else {
             tracing::info!(dir = %dir.display(), "generating new receiver identity");
             let host = host_name();
-            let CertifiedKey { cert, signing_key } = generate_simple_self_signed(vec![format!(
-                "wireless-display@{host}"
-            )])?;
+            let CertifiedKey { cert, signing_key } =
+                generate_simple_self_signed(vec![format!("wireless-display@{host}")])?;
             let cert_der = cert.der().to_vec();
             let key_der = signing_key.serialize_der();
             write_private(&key_path, &key_der)?;
@@ -65,7 +61,9 @@ impl Identity {
         &self.host_name
     }
 
-    pub fn tls_material(&self) -> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
+    pub fn tls_material(
+        &self,
+    ) -> anyhow::Result<(Vec<CertificateDer<'static>>, PrivateKeyDer<'static>)> {
         let cert = CertificateDer::from(self.cert_der.clone());
         let key = PrivatePkcs8KeyDer::from(self.key_der.clone()).into();
         Ok((vec![cert], key))
@@ -106,7 +104,11 @@ mod tests {
         assert_eq!(id1.fingerprint_short(), fp1[..12]);
 
         let id2 = Identity::load_or_create(dir.path()).unwrap();
-        assert_eq!(fp1, id2.fingerprint_hex(), "identity must persist across restarts");
+        assert_eq!(
+            fp1,
+            id2.fingerprint_hex(),
+            "identity must persist across restarts"
+        );
 
         let (certs, key) = id2.tls_material().unwrap();
         assert_eq!(certs.len(), 1);

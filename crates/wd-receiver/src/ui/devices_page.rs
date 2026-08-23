@@ -6,6 +6,9 @@ use crate::net::PairedDevice;
 pub struct DevicesPage {
     pub root: adw::ToolbarView,
     paired_group: adw::PreferencesGroup,
+    /// Rows we added to `paired_group` (removal must skip the group's
+    /// internal widgets, so we track them ourselves).
+    paired_rows: std::cell::RefCell<Vec<adw::ActionRow>>,
     status_row: adw::ActionRow,
     address_row: adw::ActionRow,
     fingerprint_row: adw::ActionRow,
@@ -124,7 +127,10 @@ impl DevicesPage {
         for device in devices {
             let row = adw::ActionRow::builder()
                 .title(device.name.clone())
-                .subtitle(format!("paired device {}", &device.device_id[..8.min(device.device_id.len())]))
+                .subtitle(format!(
+                    "paired device {}",
+                    &device.device_id[..8.min(device.device_id.len())]
+                ))
                 .build();
             let badge = gtk::Label::new(Some("trusted"));
             badge.add_css_class("success");

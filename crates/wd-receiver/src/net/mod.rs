@@ -1,12 +1,13 @@
 pub mod identity;
 pub mod listener;
+pub mod media;
 pub mod pairing;
 
 use std::net::SocketAddr;
 use std::sync::Arc;
 
 pub use identity::Identity;
-pub use listener::{ListenerEvent, ListenerHandle, NetContext, start_listener};
+pub use listener::{ListenerEvent, ListenerHandle, MediaHooks, NetContext, start_listener};
 pub use pairing::{PairedDevice, PairingManager};
 
 #[derive(Debug, thiserror::Error)]

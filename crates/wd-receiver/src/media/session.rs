@@ -1,12 +1,12 @@
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{mpsc, Arc};
+use std::sync::{Arc, mpsc};
 use std::time::Duration;
 
 use gstreamer as gst;
 use gstreamer::prelude::*;
 use gstreamer_app as gst_app;
 
-use super::{MediaCounters, MediaEvent, VideoParams, JITTER_LATENCY_MS};
+use super::{JITTER_LATENCY_MS, MediaCounters, MediaEvent, VideoParams};
 
 /// Pre-built sink elements. Production passes the GTK paintable sink (created
 /// on the UI thread); tests pass `None` and get fakesinks.
@@ -39,7 +39,8 @@ impl MediaSession {
         let mut tasks = Vec::new();
 
         if let Some(vp) = video {
-            let (pipeline, appsrc) = build_video_pipeline(vp, sinks.video.clone(), counters.clone(), events.clone())?;
+            let (pipeline, appsrc) =
+                build_video_pipeline(vp, sinks.video.clone(), counters.clone(), events.clone())?;
             pipeline.set_state(gst::State::Playing)?;
             pipelines.push(pipeline);
             let src = appsrc;
@@ -76,7 +77,11 @@ impl MediaSession {
             tasks.push(tokio::spawn(bus_watch(bus, name, events.clone())));
         }
 
-        Ok(Self { pipelines, stop, tasks })
+        Ok(Self {
+            pipelines,
+            stop,
+            tasks,
+        })
     }
 
     pub fn stop(&mut self) {
@@ -96,8 +101,12 @@ impl Drop for MediaSession {
     }
 }
 
-async fn pump<F>(rx: mpsc::Receiver<Vec<u8>>, stop: Arc<AtomicBool>, counter: std::sync::atomic::AtomicU64, push: F)
-where
+async fn pump<F>(
+    rx: mpsc::Receiver<Vec<u8>>,
+    stop: Arc<AtomicBool>,
+    counter: std::sync::atomic::AtomicU64,
+    push: F,
+) where
     F: Fn(Vec<u8>) + Send + 'static,
 {
     loop {
@@ -165,8 +174,24 @@ fn build_video_pipeline(
             .expect("fakesink always exists")
     });
 
-    pipeline.add_many([&appsrc.upcast_ref(), &jb, &depay, &parse, &decoder, &convert, &sink_el])?;
-    gst::Element::link_many([&appsrc.upcast_ref(), &jb, &depay, &parse, &decoder, &convert, &sink_el])?;
+    pipeline.add_many([
+        &appsrc.upcast_ref(),
+        &jb,
+        &depay,
+        &parse,
+        &decoder,
+        &convert,
+        &sink_el,
+    ])?;
+    gst::Element::link_many([
+        &appsrc.upcast_ref(),
+        &jb,
+        &depay,
+        &parse,
+        &decoder,
+        &convert,
+        &sink_el,
+    ])?;
 
     tracing::debug!(
         width = vp.width,
@@ -182,7 +207,9 @@ fn build_video_pipeline(
     dec_pad.add_probe(gst::PadProbeType::BUFFER, move |_, info| {
         if let Some(gst::PadProbeData::Buffer(ref buf)) = info.data {
             counters.video_frames.fetch_add(1, Ordering::Relaxed);
-            counters.video_bytes.fetch_add(buf.size() as u64, Ordering::Relaxed);
+            counters
+                .video_bytes
+                .fetch_add(buf.size() as u64, Ordering::Relaxed);
             if !first.swap(true, Ordering::SeqCst) {
                 let _ = events.try_send(MediaEvent::FirstVideoFrame {
                     decoder: decoder_name.clone(),
@@ -257,9 +284,10 @@ fn build_audio_pipeline(
 
 async fn bus_watch(bus: gst::Bus, name: String, events: mpsc::Sender<MediaEvent>) {
     loop {
-        if let Some(m) =
-            bus.timed_pop_filtered(Duration::from_millis(250), &[gst::MessageType::Error, gst::MessageType::Eos])
-        {
+        if let Some(m) = bus.timed_pop_filtered(
+            Duration::from_millis(250),
+            &[gst::MessageType::Error, gst::MessageType::Eos],
+        ) {
             match m.view() {
                 gst::MessageView::Error(e) => {
                     let reason = format!("{name}: {}", e.error());

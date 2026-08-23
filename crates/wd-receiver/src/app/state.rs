@@ -14,6 +14,7 @@ pub enum UiEvent {
     KnownDevices(Vec<PairedDevice>),
     PairingPrompt { code: String },
     PairingOutcome { ok: bool, message: String },
+    MediaFirstFrame { decoder: String },
     Metrics(BTreeMap<String, MetricValue>),
 }
 
@@ -24,6 +25,9 @@ pub struct AppState {
     pub session: Arc<SessionManager>,
     /// Shared with the network stack so the UI, listener and store agree.
     pub pairing: Arc<PairingManager>,
+    /// The `gtk4paintablesink` element created on the main thread; the window
+    /// fetches its paintable property when building the video surface.
+    pub media_video_sink: Mutex<Option<gstreamer::Element>>,
     ui_tx: async_channel::Sender<UiEvent>,
     ui_rx: async_channel::Receiver<UiEvent>,
 }
@@ -37,6 +41,7 @@ impl AppState {
             system,
             session: Arc::new(SessionManager::new()),
             pairing,
+            media_video_sink: Mutex::new(None),
             ui_tx,
             ui_rx,
         }

@@ -1,6 +1,6 @@
 use std::net::SocketAddr;
-use std::sync::{Arc, Mutex};
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use tokio::sync::{mpsc, watch};
@@ -126,11 +126,12 @@ pub fn start_listener(
 
     let quic_config = quinn::crypto::rustls::QuicServerConfig::try_from(server_crypto)
         .map_err(|e| fail(format!("quic config rejected identity: {e}")))?;
-    let endpoint = quinn::Endpoint::server(
-        quinn::ServerConfig::with_crypto(Arc::new(quic_config)),
-        bind_addr,
-    )
-    .map_err(|e| fail(e.to_string()))?;
+    let mut server_config = quinn::ServerConfig::with_crypto(Arc::new(quic_config));
+    let mut transport = quinn::TransportConfig::default();
+    super::media::enable_datagrams(&mut transport);
+    server_config.transport_config(Arc::new(transport));
+    let endpoint =
+        quinn::Endpoint::server(server_config, bind_addr).map_err(|e| fail(e.to_string()))?;
     let local_addr = super::endpoint_local_addr(&endpoint);
     tracing::info!(%local_addr, "QUIC listener ready");
 
@@ -432,16 +433,8 @@ async fn pairing_flow(
             }
             let mut media: Option<MediaRuntime> = None;
             let (cmd_tx, mut cmd_rx) = mpsc::channel::<MediaCmd>(8);
-            let outcome = serve_control_loop(
-                send,
-                recv,
-                conn,
-                ctx,
-                &mut media,
-                &cmd_tx,
-                &mut cmd_rx,
-            )
-            .await;
+            let outcome =
+                serve_control_loop(send, recv, conn, ctx, &mut media, &cmd_tx, &mut cmd_rx).await;
             drop(media);
             outcome
         }
@@ -562,9 +555,9 @@ async fn serve_control_loop(
                         Message::KeyframeRequest => {
                             tracing::info!("phone requested a keyframe");
                         }
-                        Message::BitrateHint { kbps } => {
-                            ctx.metrics_text(&format!("sender bitrate hint {kbps} kbps"));
-                            tracing::debug!(kbps, "bitrate hint from phone");
+                        Message::BitrateHint { video_kbps } => {
+                            ctx.metrics_text(&format!("sender bitrate hint {video_kbps} kbps"));
+                            tracing::debug!(video_kbps, "bitrate hint from phone");
                         }
                         Message::Bye { reason } => {
                             let _ = write_frame(
@@ -628,7 +621,8 @@ fn start_media(
     let (events_tx, events_rx) = std::sync::mpsc::channel::<MediaEvent>();
     let (video_tx, video_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(512);
     let (audio_tx, audio_rx) = std::sync::mpsc::sync_channel::<Vec<u8>>(1024);
-    let ingest = super::media::MediaIngest::spawn(conn.clone(), video_tx, audio_tx, counters.clone());
+    let ingest =
+        super::media::MediaIngest::spawn(conn.clone(), video_tx, audio_tx, counters.clone());
 
     let vp = crate::media::VideoParams {
         width: video.width,
@@ -703,7 +697,9 @@ fn spawn_media_helpers(
                 Ok(MediaEvent::FirstVideoFrame { decoder }) => {
                     if ev_session.state() == SessionState::Negotiating {
                         match ev_session.transition(SessionState::Streaming) {
-                            Ok(()) => tracing::info!(decoder = %decoder, "first frame decoded — streaming"),
+                            Ok(()) => {
+                                tracing::info!(decoder = %decoder, "first frame decoded — streaming")
+                            }
                             Err(e) => tracing::warn!(error = %e, "streaming transition refused"),
                         }
                     }
@@ -743,7 +739,9 @@ fn spawn_media_helpers(
             match since_video {
                 Some(elapsed) if elapsed > Duration::from_secs(7) => {
                     tracing::warn!("no video for 7 s — failing session");
-                    let _ = wd_cmd.send(MediaCmd::Stall("no video data from phone".into())).await;
+                    let _ = wd_cmd
+                        .send(MediaCmd::Stall("no video data from phone".into()))
+                        .await;
                     return;
                 }
                 Some(elapsed)

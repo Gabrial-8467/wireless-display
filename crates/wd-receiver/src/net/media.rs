@@ -38,9 +38,12 @@ pub fn payload_type(packet: &[u8]) -> Option<u8> {
 }
 
 impl MediaIngest {
-    pub fn spawn(conn: quinn::Connection, counters: Arc<MediaCounters>) -> Self {
-        let (video_tx, _) = mpsc::sync_channel::<Vec<u8>>(512);
-        let (audio_tx, _) = mpsc::sync_channel::<Vec<u8>>(1024);
+    pub fn spawn(
+        conn: quinn::Connection,
+        video_tx: mpsc::SyncSender<Vec<u8>>,
+        audio_tx: mpsc::SyncSender<Vec<u8>>,
+        counters: Arc<MediaCounters>,
+    ) -> Self {
         let video_q = video_tx.clone();
         let audio_q = audio_tx.clone();
         let last_video = Arc::new(Mutex::new(None::<Instant>));
@@ -85,10 +88,10 @@ impl MediaIngest {
         });
 
         Self {
-            video_tx,
-            audio_tx,
             counters,
             last_video,
+            _video_tx: video_tx,
+            _audio_tx: audio_tx,
             task,
         }
     }
@@ -96,6 +99,6 @@ impl MediaIngest {
 
 /// Raises the QUIC datagram receive window on both endpoints; without this
 /// peers negotiate "datagrams unsupported".
-pub fn enable_datagrams(cfg: &mut quinn_proto::TransportConfig) {
+pub fn enable_datagrams(cfg: &mut quinn::TransportConfig) {
     cfg.datagram_receive_buffer_size(Some(512 * 1024));
 }

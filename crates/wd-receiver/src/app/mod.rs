@@ -116,6 +116,34 @@ fn bring_up_network(
     let identity = Arc::new(Identity::load_or_create(&config::identity_dir())?);
     let (events_tx, events_rx) = tokio::sync::mpsc::channel(64);
 
+    // Media sinks must exist before any pipeline is built. The video sink is
+    // a gtk4paintablesink created on this (main) thread; its paintable is
+    // attached to a gtk::Picture by the UI later.
+    let video_sink = gstreamer::ElementFactory::make("gtk4paintablesink")
+        .name("wdl-video-out")
+        .build()
+        .map_err(|e| anyhow::anyhow!("gtk4paintablesink unavailable: {e}"))?;
+    *state.media_video_sink.lock().unwrap() = Some(video_sink.clone());
+
+    let audio_sink = gstreamer::ElementFactory::make("pipewiresink")
+        .name("wdl-audio-out")
+        .build()
+        .unwrap_or_else(|e| {
+            tracing::warn!(%e, "pipewiresink unavailable; audio will be dropped");
+            gstreamer::ElementFactory::make("fakesink")
+                .property("sync", false)
+                .build()
+                .expect("fakesink always exists")
+        });
+
+    let hooks = crate::net::MediaHooks {
+        sinks: crate::media::session::Sinks {
+            video: Some(video_sink),
+            audio: Some(audio_sink),
+        },
+        metrics: state.metrics.clone(),
+    };
+
     let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.network.listen_port));
     let listener = {
         let ctx = NetContext::new(
@@ -123,7 +151,8 @@ fn bring_up_network(
             state.pairing.clone(),
             state.session.clone(),
             events_tx,
-        );
+        )
+        .with_media(hooks);
         // start_listener spawns tasks, so it must run inside the runtime.
         runtime
             .block_on(async { start_listener(ctx, bind_addr) })
@@ -180,6 +209,7 @@ fn spawn_listener_forwarder(
                 }
                 ListenerEvent::Disconnected { clean, reason } => {
                     state.metrics.set_text("session.peer", "");
+                    state.metrics.set_text("net.media", "idle");
                     if !clean {
                         tracing::warn!(%reason, "connection lost");
                     }
@@ -190,6 +220,9 @@ fn spawn_listener_forwarder(
                         ok: true,
                         message: format!("Paired with {name}"),
                     });
+                }
+                ListenerEvent::MediaFirstFrame { decoder } => {
+                    let _ = ui(UiEvent::MediaFirstFrame { decoder });
                 }
             }
         }

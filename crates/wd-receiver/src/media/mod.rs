@@ -82,10 +82,16 @@ impl MediaCounters {
 #[derive(Debug, Clone)]
 pub enum MediaEvent {
     /// Exactly once, when the first video AU leaves the decoder.
-    FirstVideoFrame { decoder: String },
+    FirstVideoFrame {
+        decoder: String,
+    },
     /// Decoder/pipeline error; session should request a keyframe or fail.
-    VideoError { reason: String },
-    AudioError { reason: String },
+    VideoError {
+        reason: String,
+    },
+    AudioError {
+        reason: String,
+    },
 }
 
 pub const JITTER_LATENCY_MS: u32 = 40;

@@ -28,6 +28,15 @@ pub fn run(state: Arc<AppState>) -> i32 {
         Some(crate::config::APP_ID),
         gtk::gio::ApplicationFlags::empty(),
     );
+    // Accept our own startup flag so GTK/GIO doesn't reject it.
+    app.add_main_option(
+        "open-pairing",
+        glib::Char::from(b'p'),
+        glib::OptionFlags::NONE,
+        glib::OptionArg::None,
+        "Open a pairing window at startup and print the 6-digit code",
+        None,
+    );
     let ui_state = state.clone();
     app.connect_activate(move |app| {
         if let Some(existing) = app.active_window() {

@@ -67,6 +67,11 @@ struct PairedStore {
 
 impl PairedStore {
     fn load(path: &Path) -> Self {
+        if let Some(parent) = path.parent()
+            && let Err(e) = fs::create_dir_all(parent)
+        {
+            tracing::warn!(error = %e, dir = %parent.display(), "could not create data dir");
+        }
         let devices = fs::read(path)
             .ok()
             .and_then(|bytes| {

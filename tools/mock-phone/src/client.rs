@@ -192,7 +192,7 @@ pub async fn authenticate(
     conn: &quinn::Connection,
     phone_name: &str,
     token: &str,
-) -> anyhow::Result<String> {
+) -> anyhow::Result<(quinn::SendStream, quinn::RecvStream)> {
     let (mut send, mut recv) = conn.open_bi().await.context("open control stream")?;
     write_frame(
         &mut send,
@@ -205,25 +205,26 @@ pub async fn authenticate(
     .await?;
     match read_frame(&mut recv).await? {
         Message::HelloAck {
-            receiver_name,
+            receiver_name: _,
             proto_version,
         } => {
             anyhow::ensure!(
                 Version::CURRENT.compatible_with(proto_version),
                 "receiver speaks incompatible protocol {proto_version}"
             );
-            Ok(receiver_name)
+            // Keep both halves of the control stream: the session loop
+            // continues to use this same pair of streams.
+            Ok((send, recv))
         }
         other => anyhow::bail!("expected HelloAck, got {:?}", kind_of(&other)),
     }
 }
 
 /// Ping loop until the receiver says bye or drops us. Prints measured RTT.
-pub async fn serve_until_bye(conn: &quinn::Connection) -> anyhow::Result<()> {
-    let (mut send, mut recv) = conn
-        .accept_bi()
-        .await
-        .context("receiver closed before session loop")?;
+pub async fn serve_until_bye(
+    mut send: quinn::SendStream,
+    mut recv: quinn::RecvStream,
+) -> anyhow::Result<()> {
     let ping_interval = tokio::time::interval(Duration::from_secs(2));
     tokio::pin!(ping_interval);
 

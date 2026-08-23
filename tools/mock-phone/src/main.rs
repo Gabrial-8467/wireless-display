@@ -151,9 +151,9 @@ async fn run(opts: ConnectOpts) -> anyhow::Result<()> {
     let stored: StoredDevice = serde_json::from_slice(&raw)?;
 
     let conn = client::connect(opts.addr()).await?;
-    let receiver_name = client::authenticate(&conn, &opts.name, &stored.token).await?;
-    println!("connected to “{receiver_name}”");
-    client::serve_until_bye(&conn).await?;
-    println!("receiver closed the session");
+    let (send, recv) = client::authenticate(&conn, &opts.name, &stored.token).await?;
+    println!("connected to receiver");
+    client::serve_until_bye(send, recv).await?;
+    println!("session ended");
     Ok(())
 }

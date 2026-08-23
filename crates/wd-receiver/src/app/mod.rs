@@ -67,8 +67,15 @@ fn real_main() -> anyhow::Result<()> {
 
     // Network stack: identity, pairing store, QUIC listener, mDNS ad.
     // Failure here is logged; the UI still comes up in diagnostics mode.
+    let open_pairing = std::env::args().any(|a| a == "--open-pairing");
     let network = match bring_up_network(&runtime, &state, &config) {
-        Ok(parts) => Some(parts),
+        Ok(parts) => {
+            if open_pairing {
+                let code = state.start_pairing();
+                println!("PAIRING_CODE={code}");
+            }
+            Some(parts)
+        }
         Err(error) => {
             tracing::error!(%error, "network stack failed to start");
             state.metrics.set_text("app.state", "network-error");

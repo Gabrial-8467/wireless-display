@@ -1,3 +1,4 @@
+mod cast;
 mod client;
 
 use std::net::{IpAddr, SocketAddr};
@@ -19,11 +20,17 @@ async fn main() -> anyhow::Result<()> {
             let opts = ConnectOpts::parse(&args)?;
             run(opts).await
         }
+        Some("cast") => {
+            let opts = ConnectOpts::parse(&args)?;
+            run_cast(opts, cast_media(&args)?).await
+        }
         _ => {
             eprintln!(
                 "usage: mock-phone discover [--timeout 3]\n\
                  \x20      mock-phone pair --host IP --port N --code CODE --name NAME [--state DIR]\n\
-                 \x20      mock-phone run  --host IP --port N --name NAME [--state DIR]"
+                 \x20      mock-phone run  --host IP --port N --name NAME [--state DIR]\n\
+                 \x20      mock-phone cast --host IP --port N [--width W] [--height H] [--fps F] \
+                 [--bitrate-kbps K] [--no-audio] [--name NAME] [--state DIR]"
             );
             std::process::exit(2)
         }
@@ -34,6 +41,25 @@ fn timeout_secs(args: &[String]) -> u64 {
     opt_value(args, "--timeout")
         .and_then(|v| v.parse().ok())
         .unwrap_or(3)
+}
+
+fn cast_media(args: &[String]) -> anyhow::Result<cast::CastMedia> {
+    let media = cast::CastMedia {
+        width: opt_num(opt_value(args, "--width"), 1280)?,
+        height: opt_num(opt_value(args, "--height"), 720)?,
+        fps: opt_num(opt_value(args, "--fps"), 30)?,
+        bitrate_kbps: opt_num(opt_value(args, "--bitrate-kbps"), 4000)?,
+        with_audio: !args.iter().any(|a| a == "--no-audio"),
+    };
+    media.validate()?;
+    Ok(media)
+}
+
+fn opt_num<T: std::str::FromStr>(raw: Option<String>, default: T) -> anyhow::Result<T> {
+    raw.map_or(Ok(default), |v| {
+        v.parse()
+            .map_err(|_| anyhow::anyhow!("invalid numeric value `{v}`"))
+    })
 }
 
 fn opt_value(args: &[String], key: &str) -> Option<String> {
@@ -146,9 +172,7 @@ async fn pair(opts: ConnectOpts, code: String) -> anyhow::Result<()> {
 }
 
 async fn run(opts: ConnectOpts) -> anyhow::Result<()> {
-    let raw = std::fs::read(store_path(&opts.state_dir))
-        .context("no stored pairing; run `mock-phone pair` first")?;
-    let stored: StoredDevice = serde_json::from_slice(&raw)?;
+    let stored = load_stored(&opts.state_dir)?;
 
     let conn = client::connect(opts.addr()).await?;
     let (send, recv) = client::authenticate(&conn, &opts.name, &stored.token).await?;
@@ -156,4 +180,15 @@ async fn run(opts: ConnectOpts) -> anyhow::Result<()> {
     client::serve_until_bye(send, recv).await?;
     println!("session ended");
     Ok(())
+}
+
+fn load_stored(state_dir: &std::path::Path) -> anyhow::Result<StoredDevice> {
+    let raw = std::fs::read(store_path(state_dir))
+        .context("no stored pairing; run `mock-phone pair` first")?;
+    Ok(serde_json::from_slice(&raw)?)
+}
+
+async fn run_cast(opts: ConnectOpts, media: cast::CastMedia) -> anyhow::Result<()> {
+    let stored = load_stored(&opts.state_dir)?;
+    cast::run(opts, media, &stored.token).await
 }

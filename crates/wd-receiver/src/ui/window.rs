@@ -123,6 +123,15 @@ fn build_window(app: &adw::Application, state: &Arc<AppState>) -> adw::Applicati
     devices_page.update_devices(&state.pairing.list_devices());
 
     let connection_page = ConnectionPage::build();
+    if let Some(paintable) = state
+        .media_video_sink
+        .lock()
+        .expect("sink lock")
+        .clone()
+        .and_then(|sink| sink.property::<Option<gtk::gdk::Paintable>>("paintable"))
+    {
+        connection_page.attach_video(&paintable);
+    }
     let diagnostics_page = DiagnosticsPage::build(state, toast_overlay.clone());
 
     let stack = gtk::Stack::new();
@@ -215,12 +224,21 @@ fn spawn_ui_bridge(
                 UiEvent::State(s) => {
                     status_label.set_text(&s.to_string());
                     connection_page.update_state(s);
+                    connection_page.show_video(matches!(
+                        s,
+                        session::State::Streaming | session::State::Recovering
+                    ));
                     let target = page_for_state(s);
                     if stack.visible_child_name().map(|n| n.to_string()) != Some(target.into()) {
                         stack.set_visible_child_name(target);
                     }
                 }
-                UiEvent::Peer(peer) => connection_page.update_peer(peer.as_deref()),
+                UiEvent::Peer(peer) => {
+                    connection_page.update_peer(peer.as_deref());
+                    if peer.is_none() {
+                        connection_page.show_video(false);
+                    }
+                }
                 UiEvent::KnownDevices(devices) => devices_page.update_devices(&devices),
                 UiEvent::PairingPrompt { code } => {
                     show_pairing_dialog(Some(&window), state.clone(), &code)
@@ -233,6 +251,9 @@ fn spawn_ui_bridge(
                         toast.set_timeout(6);
                     }
                     toast_overlay.add_toast(toast);
+                }
+                UiEvent::MediaFirstFrame { decoder } => {
+                    status_label.set_text(&format!("streaming · {decoder}"));
                 }
                 UiEvent::Metrics(snapshot) => {
                     connection_page.update_metrics(&snapshot);

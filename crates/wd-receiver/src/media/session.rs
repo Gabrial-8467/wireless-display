@@ -10,7 +10,7 @@ use super::{JITTER_LATENCY_MS, MediaCounters, MediaEvent, VideoParams};
 
 /// Pre-built sink elements. Production passes the GTK paintable sink (created
 /// on the UI thread); tests pass `None` and get fakesinks.
-#[derive(Default)]
+#[derive(Default, Clone)]
 pub struct Sinks {
     pub video: Option<gst::Element>,
     pub audio: Option<gst::Element>,
@@ -47,9 +47,9 @@ impl MediaSession {
             tasks.push(tokio::spawn(pump(
                 video_rx,
                 stop.clone(),
-                counters.dropped_datagrams.clone(),
+                counters.clone(),
+                true,
                 move |data| {
-                    use gstreamer::prelude::*;
                     let _ = src.push_buffer(gstreamer::Buffer::from_slice(data));
                 },
             )));
@@ -63,9 +63,9 @@ impl MediaSession {
             tasks.push(tokio::spawn(pump(
                 audio_rx,
                 stop.clone(),
-                counters.audio_packets.clone(),
+                counters.clone(),
+                false,
                 move |data| {
-                    use gstreamer::prelude::*;
                     let _ = src.push_buffer(gstreamer::Buffer::from_slice(data));
                 },
             )));
@@ -104,15 +104,22 @@ impl Drop for MediaSession {
 async fn pump<F>(
     rx: mpsc::Receiver<Vec<u8>>,
     stop: Arc<AtomicBool>,
-    counter: std::sync::atomic::AtomicU64,
+    counters: Arc<MediaCounters>,
+    is_video: bool,
     push: F,
 ) where
     F: Fn(Vec<u8>) + Send + 'static,
 {
+    use std::sync::atomic::Ordering::Relaxed;
     loop {
         match rx.recv_timeout(Duration::from_millis(100)) {
             Ok(data) => {
-                counter.fetch_add(1, Ordering::Relaxed);
+                if is_video {
+                    counters.video_packets.fetch_add(1, Relaxed);
+                } else {
+                    counters.audio_packets.fetch_add(1, Relaxed);
+                    counters.audio_bytes.fetch_add(data.len() as u64, Relaxed);
+                }
                 push(data);
             }
             Err(mpsc::RecvTimeoutError::Timeout) => {}
@@ -130,7 +137,7 @@ fn build_video_pipeline(
     counters: Arc<MediaCounters>,
     events: mpsc::Sender<MediaEvent>,
 ) -> anyhow::Result<(gst::Pipeline, gst_app::AppSrc)> {
-    let pipeline = gst::Pipeline::new(Some("wdl-video"));
+    let pipeline = gst::Pipeline::with_name("wdl-video");
     let appsrc = gst_app::AppSrc::builder()
         .caps(
             &gst::Caps::builder("application/x-rtp")
@@ -142,7 +149,7 @@ fn build_video_pipeline(
         )
         .is_live(true)
         .format(gst::Format::Time)
-        .max_bytes(u64::from(4 * 1024 * 1024))
+        .max_bytes(4 * 1024 * 1024)
         .build();
 
     let jb = gst::ElementFactory::make("rtpjitterbuffer")
@@ -155,16 +162,19 @@ fn build_video_pipeline(
         .property_from_str("config-interval", "-1")
         .build()?;
 
-    let mut decoder_name = String::new();
-    let decoder = diag::DECODER_CANDIDATES
-        .iter()
-        .find_map(|c| {
-            gst::ElementFactory::make(c).build().ok().map(|el| {
-                decoder_name.clone_from(c);
-                el
-            })
-        })
-        .ok_or_else(|| anyhow::anyhow!("no H.264 decoder available"))?;
+    let decoder_name;
+    let decoder = {
+        let candidates = crate::diag::DECODER_CANDIDATES;
+        let found = candidates.iter().find_map(|c| {
+            gst::ElementFactory::make(c)
+                .build()
+                .ok()
+                .map(|el| (el, (*c).to_string()))
+        });
+        let (decoder, name) = found.ok_or_else(|| anyhow::anyhow!("no H.264 decoder available"))?;
+        decoder_name = name;
+        decoder
+    };
 
     let convert = gst::ElementFactory::make("videoconvert").build()?;
     let sink_el = sink.unwrap_or_else(|| {
@@ -175,7 +185,7 @@ fn build_video_pipeline(
     });
 
     pipeline.add_many([
-        &appsrc.upcast_ref(),
+        appsrc.upcast_ref(),
         &jb,
         &depay,
         &parse,
@@ -184,7 +194,7 @@ fn build_video_pipeline(
         &sink_el,
     ])?;
     gst::Element::link_many([
-        &appsrc.upcast_ref(),
+        appsrc.upcast_ref(),
         &jb,
         &depay,
         &parse,
@@ -211,7 +221,7 @@ fn build_video_pipeline(
                 .video_bytes
                 .fetch_add(buf.size() as u64, Ordering::Relaxed);
             if !first.swap(true, Ordering::SeqCst) {
-                let _ = events.try_send(MediaEvent::FirstVideoFrame {
+                let _ = events.send(MediaEvent::FirstVideoFrame {
                     decoder: decoder_name.clone(),
                 });
             }
@@ -227,7 +237,7 @@ fn build_audio_pipeline(
     channels: u8,
     sink: Option<gst::Element>,
 ) -> anyhow::Result<(gst::Pipeline, gst_app::AppSrc)> {
-    let pipeline = gst::Pipeline::new(Some("wdl-audio"));
+    let pipeline = gst::Pipeline::with_name("wdl-audio");
     let appsrc = gst_app::AppSrc::builder()
         .caps(
             &gst::Caps::builder("application/x-rtp")
@@ -239,7 +249,7 @@ fn build_audio_pipeline(
         )
         .is_live(true)
         .format(gst::Format::Time)
-        .max_bytes(u64::from(1024 * 1024))
+        .max_bytes(1024 * 1024)
         .build();
     let jb = gst::ElementFactory::make("rtpjitterbuffer")
         .name("wdl-audio-jb")
@@ -259,7 +269,7 @@ fn build_audio_pipeline(
     let _ = channels; // negotiated by caps on first payload
 
     pipeline.add_many([
-        &appsrc.upcast_ref(),
+        appsrc.upcast_ref(),
         &jb,
         &depay,
         &parse,
@@ -269,7 +279,7 @@ fn build_audio_pipeline(
         &sink_el,
     ])?;
     gst::Element::link_many([
-        &appsrc.upcast_ref(),
+        appsrc.upcast_ref(),
         &jb,
         &depay,
         &parse,
@@ -285,7 +295,7 @@ fn build_audio_pipeline(
 async fn bus_watch(bus: gst::Bus, name: String, events: mpsc::Sender<MediaEvent>) {
     loop {
         if let Some(m) = bus.timed_pop_filtered(
-            Duration::from_millis(250),
+            gst::ClockTime::from_mseconds(250),
             &[gst::MessageType::Error, gst::MessageType::Eos],
         ) {
             match m.view() {

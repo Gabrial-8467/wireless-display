@@ -57,22 +57,32 @@ pub fn validate_offer(
     Ok(())
 }
 
-/// Live counters shared between pad probes and the metrics task.
+/// Live counters shared between pad probes, ingest pumps and metrics tasks.
 #[derive(Default)]
 pub struct MediaCounters {
+    /// Access units leaving the H.264 decoder (pad probe).
     pub video_frames: std::sync::atomic::AtomicU64,
+    /// Decoded bytes (pad probe; basis of the video bitrate gauge).
     pub video_bytes: std::sync::atomic::AtomicU64,
+    /// RTP video datagrams fed into the pipeline.
+    pub video_packets: std::sync::atomic::AtomicU64,
+    /// Opus packets fed into the pipeline.
     pub audio_packets: std::sync::atomic::AtomicU64,
+    /// RTP audio bytes fed into the pipeline (basis of the audio gauge).
+    pub audio_bytes: std::sync::atomic::AtomicU64,
+    /// Datagrams dropped by the ingest router or full queues.
     pub dropped_datagrams: std::sync::atomic::AtomicU64,
 }
 
 impl MediaCounters {
-    pub fn snapshot(&self) -> (u64, u64, u64, u64) {
+    pub fn snapshot(&self) -> (u64, u64, u64, u64, u64, u64) {
         use std::sync::atomic::Ordering::Relaxed;
         (
             self.video_frames.load(Relaxed),
             self.video_bytes.load(Relaxed),
+            self.video_packets.load(Relaxed),
             self.audio_packets.load(Relaxed),
+            self.audio_bytes.load(Relaxed),
             self.dropped_datagrams.load(Relaxed),
         )
     }

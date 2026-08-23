@@ -20,7 +20,7 @@ pub enum UiEvent {
 
 pub struct AppState {
     pub config: Mutex<Config>,
-    pub metrics: MetricsRegistry,
+    pub metrics: Arc<MetricsRegistry>,
     pub system: SystemInfo,
     pub session: Arc<SessionManager>,
     /// Shared with the network stack so the UI, listener and store agree.
@@ -37,7 +37,7 @@ impl AppState {
         let (ui_tx, ui_rx) = async_channel::unbounded();
         Self {
             config: Mutex::new(config),
-            metrics: MetricsRegistry::new(),
+            metrics: Arc::new(MetricsRegistry::new()),
             system,
             session: Arc::new(SessionManager::new()),
             pairing,

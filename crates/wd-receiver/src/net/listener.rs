@@ -691,6 +691,7 @@ fn spawn_media_helpers(
     // 1. event pump
     let ev_session = session.clone();
     let ev_cmd = cmd_tx.clone();
+    let ev_metrics = metrics.clone();
     let events_task = tokio::spawn(async move {
         loop {
             match events_rx.recv_timeout(Duration::from_millis(200)) {
@@ -703,18 +704,18 @@ fn spawn_media_helpers(
                             Err(e) => tracing::warn!(error = %e, "streaming transition refused"),
                         }
                     }
-                    metrics.set_text("net.decoder", &decoder);
-                    metrics.set_text("net.media", "streaming");
+                    ev_metrics.set_text("net.decoder", &decoder);
+                    ev_metrics.set_text("net.media", "streaming");
                     let _ = ui_tx.send(ListenerEvent::MediaFirstFrame { decoder }).await;
                 }
                 Ok(MediaEvent::VideoError { reason }) => {
                     tracing::warn!(%reason, "video pipeline error; requesting keyframe");
-                    metrics.set_text("net.media", "recovering");
+                    ev_metrics.set_text("net.media", "recovering");
                     let _ = ev_cmd.send(MediaCmd::RequestKeyframe).await;
                 }
                 Ok(MediaEvent::AudioError { reason }) => {
                     tracing::warn!(%reason, "audio pipeline error");
-                    metrics.set_text("net.audio", "error");
+                    ev_metrics.set_text("net.audio", "error");
                 }
                 Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                 Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
@@ -759,10 +760,13 @@ fn spawn_media_helpers(
 
     // 3. throughput gauges
     let gauges_task = tokio::spawn(async move {
-        let (mut f0, mut b0, mut a0, _) = counters.snapshot();
+        let (mut f0, mut b0, mut a0) = {
+            let (f, b, _, _, a, _) = counters.snapshot();
+            (f, b, a)
+        };
         loop {
             tokio::time::sleep(Duration::from_secs(1)).await;
-            let (f1, b1, a1, dropped) = counters.snapshot();
+            let (f1, b1, _, _, a1, dropped) = counters.snapshot();
             let fps = f1.saturating_sub(f0);
             let kbits = b1.saturating_sub(b0).saturating_mul(8) / 1000;
             let akbits = a1.saturating_sub(a0).saturating_mul(8) / 1000;

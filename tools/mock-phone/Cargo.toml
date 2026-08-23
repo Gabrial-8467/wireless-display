@@ -10,7 +10,7 @@ path = "src/main.rs"
 
 [dependencies]
 wd-protocol = { path = "../../crates/wd-protocol", features = ["async"] }
-tokio.workspace = true
+tokio = { workspace = true, features = ["signal"] }
 anyhow.workspace = true
 quinn.workspace = true
 rustls.workspace = true
@@ -21,3 +21,6 @@ hex.workspace = true
 serde.workspace = true
 serde_json = "1"
 dirs = "6"
+bytes = "1"
+gstreamer = "0.25"
+gstreamer-app = "0.25"

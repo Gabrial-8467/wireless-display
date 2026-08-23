@@ -1,7 +1,9 @@
 mod framing;
 mod messages;
 
-pub use framing::{CodecError, decode_frame, encode_frame, read_frame, write_frame};
+pub use framing::{CodecError, decode_frame, encode_frame};
+#[cfg(feature = "async")]
+pub use framing::{read_frame, write_frame};
 pub use messages::{
     AudioCodec, AudioOffer, MAX_MESSAGE_LEN, Message, PairingOutcomeInfo, VideoCodec, VideoOffer,
 };

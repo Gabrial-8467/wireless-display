@@ -260,7 +260,7 @@ pub async fn serve_until_bye(
     }
 }
 
-fn kind_of(message: &Message) -> &'static str {
+pub(crate) fn kind_of(message: &Message) -> &'static str {
     match message {
         Message::Hello { .. } => "Hello",
         Message::HelloAck { .. } => "HelloAck",
@@ -279,7 +279,7 @@ fn kind_of(message: &Message) -> &'static str {
     }
 }
 
-fn unix_millis() -> u64 {
+pub(crate) fn unix_millis() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)

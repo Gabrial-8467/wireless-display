@@ -42,6 +42,7 @@ async fn spawn_test_receiver(idle_timeout: Duration) -> anyhow::Result<TestRecei
         session: session.clone(),
         events_tx,
         idle_timeout,
+        media: None,
     };
     // Port 0 lets the OS pick a free port.
     let handle = wd_receiver::net::start_listener(ctx, "127.0.0.1:0".parse()?)
@@ -421,6 +422,7 @@ async fn silent_client_hits_idle_timeout_and_disconnect_event_fires() -> anyhow:
             }
             // Connected fires right after successful pairing; keep waiting.
             ListenerEvent::Connected { name } => assert_eq!(name, "Quiet Phone"),
+            ListenerEvent::MediaFirstFrame { .. } => {}
         }
     }
     rx.handle.shutdown();

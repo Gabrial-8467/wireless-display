@@ -8,6 +8,8 @@ use crate::session;
 pub struct ConnectionPage {
     pub root: adw::StatusPage,
     stats: Vec<(&'static str, gtk::Label)>,
+    video_revealer: gtk::Revealer,
+    picture: gtk::Picture,
 }
 
 const STAT_KEYS: &[&str] = &[
@@ -47,10 +49,24 @@ impl ConnectionPage {
                 .halign(gtk::Align::Start)
                 .css_classes(["monospace"])
                 .build();
-            grid.attach(&name, 0, i as i32, 1, 1);
-            grid.attach(&value, 1, i as i32, 1, 1);
+            grid.attach(&name, 0, i as i32 + 1, 1, 1);
+            grid.attach(&value, 1, i as i32 + 1, 1, 1);
             stats.push((*key, value));
         }
+
+        // Live video surface. Hidden until the first frame decodes; the
+        // paintable comes from the receiver's gtk4paintablesink element.
+        let picture = gtk::Picture::builder()
+            .halign(gtk::Align::Center)
+            .valign(gtk::Align::Start)
+            .build();
+        picture.set_size_request(640, 360);
+        let video_revealer = gtk::Revealer::builder()
+            .transition_type(gtk::RevealerTransitionType::Crossfade)
+            .child(&picture)
+            .reveal_child(false)
+            .build();
+        grid.attach(&video_revealer, 0, 0, 2, 1);
 
         let root = adw::StatusPage::builder()
             .icon_name("phone-symbolic")
@@ -59,7 +75,22 @@ impl ConnectionPage {
             .child(&grid)
             .build();
 
-        Self { root, stats }
+        Self {
+            root,
+            stats,
+            video_revealer,
+            picture,
+        }
+    }
+
+    /// Binds the paintable exported by the receiver's `gtk4paintablesink`.
+    /// Must be called on the main thread.
+    pub fn attach_video(&self, paintable: &gtk::gdk::Paintable) {
+        self.picture.set_paintable(Some(paintable));
+    }
+
+    pub fn show_video(&self, visible: bool) {
+        self.video_revealer.set_reveal_child(visible);
     }
 
     pub fn update_state(&self, state: session::State) {

@@ -1,5 +1,5 @@
 use std::sync::Arc;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Mutex, mpsc};
 use std::time::Instant;
 
@@ -48,41 +48,42 @@ impl MediaIngest {
         let audio_q = audio_tx.clone();
         let last_video = Arc::new(Mutex::new(None::<Instant>));
         let watchdog_stamp = last_video.clone();
+        let task_counters = counters.clone();
 
         let task = tokio::spawn(async move {
             loop {
                 match conn.read_datagram().await {
                     Ok(bytes) => {
                         if bytes.len() < MIN_RTP_LEN || bytes.len() > MAX_DGRAM_LEN {
-                            counters.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
+                            task_counters
+                                .dropped_datagrams
+                                .fetch_add(1, Ordering::Relaxed);
                             continue;
                         }
                         match payload_type(&bytes) {
                             Some(PT_VIDEO_H264) => {
                                 *watchdog_stamp.lock().unwrap() = Some(Instant::now());
                                 if video_q.try_send(bytes.to_vec()).is_err() {
-                                    counters.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
+                                    task_counters
+                                        .dropped_datagrams
+                                        .fetch_add(1, Ordering::Relaxed);
                                 }
                             }
                             Some(PT_AUDIO_OPUS) => {
                                 if audio_q.try_send(bytes.to_vec()).is_err() {
-                                    counters.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
+                                    task_counters
+                                        .dropped_datagrams
+                                        .fetch_add(1, Ordering::Relaxed);
                                 }
                             }
                             _ => {
-                                counters.dropped_datagrams.fetch_add(1, Ordering::Relaxed);
+                                task_counters
+                                    .dropped_datagrams
+                                    .fetch_add(1, Ordering::Relaxed);
                             }
                         }
                     }
-                    Err(
-                        quinn::ConnectionError::ApplicationClosed(_)
-                        | quinn::ConnectionError::ConnectionClosed(_)
-                        | quinn::ConnectionError::Reset
-                        | quinn::ConnectionError::TransportError(_)
-                        | quinn::ConnectionError::VersionMismatch
-                        | quinn::ConnectionError::TimedOut
-                        | quinn::ConnectionError::LocallyClosed,
-                    ) => return,
+                    Err(_) => return,
                 }
             }
         });

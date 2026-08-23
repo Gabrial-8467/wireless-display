@@ -93,6 +93,7 @@ impl DevicesPage {
         Self {
             root,
             paired_group,
+            paired_rows: std::cell::RefCell::new(Vec::new()),
             status_row,
             address_row,
             fingerprint_row,
@@ -112,8 +113,8 @@ impl DevicesPage {
     }
 
     pub fn update_devices(&self, devices: &[PairedDevice]) {
-        while let Some(child) = self.paired_group.first_child() {
-            self.paired_group.remove(&child);
+        for row in self.paired_rows.borrow_mut().drain(..) {
+            self.paired_group.remove(&row);
         }
         if devices.is_empty() {
             let hint = adw::ActionRow::builder()
@@ -122,6 +123,7 @@ impl DevicesPage {
                 .build();
             hint.add_css_class("dimmed");
             self.paired_group.add(&hint);
+            self.paired_rows.borrow_mut().push(hint);
             return;
         }
         for device in devices {
@@ -136,6 +138,7 @@ impl DevicesPage {
             badge.add_css_class("success");
             row.add_suffix(&badge);
             self.paired_group.add(&row);
+            self.paired_rows.borrow_mut().push(row);
         }
     }
 }

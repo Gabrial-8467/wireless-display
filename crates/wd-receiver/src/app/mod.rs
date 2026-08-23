@@ -110,13 +110,18 @@ fn bring_up_network(
     let (events_tx, events_rx) = tokio::sync::mpsc::channel(64);
 
     let bind_addr = std::net::SocketAddr::from(([0, 0, 0, 0], config.network.listen_port));
-    let ctx = NetContext::new(
-        identity.clone(),
-        state.pairing.clone(),
-        state.session.clone(),
-        events_tx,
-    );
-    let listener = start_listener(ctx, bind_addr).map_err(|e| anyhow::anyhow!("{e}"))?;
+    let listener = {
+        let ctx = NetContext::new(
+            identity.clone(),
+            state.pairing.clone(),
+            state.session.clone(),
+            events_tx,
+        );
+        // start_listener spawns tasks, so it must run inside the runtime.
+        runtime
+            .block_on(async { start_listener(ctx, bind_addr) })
+            .map_err(|e| anyhow::anyhow!("{e}"))?
+    };
     tracing::info!(
         addr = %listener.local_addr(),
         fingerprint = %identity.fingerprint_short(),

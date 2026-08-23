@@ -1,7 +1,7 @@
 # 03 — Protocol Design (Companion Protocol "WDL/1")
 
-Status: Proposed draft — frozen at Phase 2 implementation, then versioned.
-All claims tagged: **[Confirmed]** verified against docs/source · **[Likely]** high confidence, verify at impl time.
+Status: **Implemented** (receiver side, Phase 2) — message catalog below matches `wd-protocol::Message`.
+Deviations from the original draft are folded in; media plane is not yet exercised (Phase 3).
 
 ## 1. Transport selection
 
@@ -43,16 +43,19 @@ Device identity = SHA-256 fingerprint of receiver TLS certificate. Display name 
 ```
 Phone                          Linux receiver
   │  mDNS/QR: addr + fingerprint   │
-  │───────── TLS connect ─────────▶│  (server presents self-signed ECDSA cert)
+  │───────── QUIC connect ────────▶│  (server presents self-signed ECDSA P-256 cert)
   │ verify fingerprint vs QR/mDNS  │
-  │── PairRequest(pin_proof) ─────▶│  SPAKE2 over 6-digit pairing code shown on BOTH screens;
-  │◀──── PairAccept(ephemeral) ────│  code binds session even if fingerprint check is skipped,
-  │   register client-cert         │  prevents rogue LAN peer pairing while user confirms
-  │◀── paired device stored ───────│  (phone generates key in Android Keystore; receiver pins it)
+  │── PairBegin(spake_msg) ───────▶│  SPAKE2 over 6-digit pairing code shown on BOTH screens;
+  │◀── PairChallenge(reply, ───────│  code binds session even if fingerprint check is skipped,
+  │      fingerprint, confirm)     │  prevents rogue LAN peer pairing while user confirms
+  │── PairVerify(confirm) ────────▶│
+  │◀── PairResult{id, token} ──────│  receiver stores {device_id, name, token}; phone keeps token
+  │                                │  (HMAC-SHA256 confirmation keys bind both directions)
 ```
 
-Subsequent connections: mutual TLS with pinned certificates, silent reconnect.
-Re-pairing = delete device in settings. All of this lives in `net::security`.
+Subsequent connections: phone presents its `auth_token` in `Hello`; receiver looks it up in the
+paired-device store and skips pairing (silent reconnect). Re-pairing = delete device in settings.
+Implemented in `net::pairing` (`PairingManager`).
 
 ## 4. Control message catalog (reliable channel, length-prefixed, postcard/serde)
 
@@ -61,17 +64,21 @@ Version field first byte-pair (`WDL`, major.minor). Unknown message types are ig
 
 | Message | Direction | Purpose |
 |---|---|---|
-| `Hello{proto_ver, device_name, capabilities}` | phone→pc | announce |
-| `HelloAck{proto_ver, accepted_caps}` | pc→phone | select transport mode, limits |
-| `PairRequest/PairChallenge/PairConfirm` | both | §3 |
-| `SessionOffer{video:{codec,res,fps,bitrate_max}, audio:{codec,rate,ch}}` | phone→pc | what it can send |
-| `SessionAnswer{accepted, constraints{max_w,max_h,max_fps,max_bitrate}, rtp_ports/ssrcs}` | pc→phone | enforce our caps |
-| `KeyframeRequest{ssrc}` | pc→phone | packet-loss recovery |
-| `BitrateHint{target_kbps}` | pc→phone | congestion feedback |
-| `ClockSync{t1,t2,t3,t4}` | both | offset estimation (median of N) |
-| `StatsReport{fps,enc_kbps,loss_pct}` | phone→pc | diagnostics mirror |
-| `Ping/Pong{nonce}` | both | RTT + liveness watchdog |
+| `Hello{proto_version, device_name, auth_token?}` | phone→pc | announce; `auth_token` present ⇒ silent reconnect attempt |
+| `HelloAck{proto_version, receiver_name}` | pc→phone | accept connection |
+| `PairBegin{device_name, spake_message}` → `PairChallenge{spake_reply, fingerprint, confirmation}` → `PairVerify{confirmation}` → `PairResult{accepted, reason?, outcome?}` | both | §3 pairing handshake |
+| `SessionOffer{video:{codec,res,fps,bitrate}, audio:{codec,rate,ch}}` | phone→pc | what it can send (Phase 3) |
+| `SessionAnswer{accepted, reason?, max_video_bitrate_kbps}` | pc→phone | enforce our caps (Phase 3) |
+| `KeyframeRequest` | pc→phone | packet-loss recovery (Phase 3) |
+| `BitrateHint{video_kbps}` | pc→phone | congestion feedback (Phase 3) |
+| `ClockSync{t1,t2,t3,t4}` | both | offset estimation (median of N) (Phase 4) |
+| `Ping/Pong{time_ms}` | both | RTT + liveness watchdog |
 | `Bye{reason}` | both | clean teardown |
+
+Deferred to later phases: `StatsReport` (diagnostics mirror), transport-mode negotiation in `HelloAck`
+(v1 control always runs on the QUIC bi-stream; media plane decided at Phase 2 benchmark). Unknown
+message variants are ignored by postcard-based decoding where possible; strict validation via
+`Message::validate()` on every frame.
 
 ## 5. Media plane rules
 

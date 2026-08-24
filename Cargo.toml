@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/wd-protocol", "crates/wd-receiver", "tools/mock-phone"]
+members = ["crates/wd-protocol", "crates/wd-receiver", "crates/wd-phone-core", "tools/mock-phone"]
 
 [workspace.package]
 version = "0.1.0"

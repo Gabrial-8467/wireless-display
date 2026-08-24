@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:multicast_dns/multicast_dns.dart';
 
+import 'cast_page.dart';
 import 'model.dart';
 
 const String kServiceType = '_wdlink._udp.local';
@@ -128,52 +129,6 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
     });
   }
 
-  void _showDetails(DiscoveredReceiver r) {
-    showModalBottomSheet<void>(
-      context: context,
-      showDragHandle: true,
-      builder: (ctx) => SafeArea(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(24, 0, 24, 24),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(r.name,
-                  style: Theme.of(ctx).textTheme.titleLarge),
-              const SizedBox(height: 12),
-              _kv('Address', '${r.host}:${r.port}'),
-              _kv('Protocol', r.proto.isEmpty ? '(unknown)' : r.proto),
-              _kv('Fingerprint',
-                  r.fingerprint.isEmpty ? '(unknown)' : r.fingerprint),
-              const SizedBox(height: 16),
-              const Text(
-                'Discovery works end-to-end. Secure pairing (SPAKE2 over QUIC) '
-                'activates once the Rust core ships as a native library for '
-                'Android — the next milestone.',
-                style: TextStyle(color: Colors.white54, fontSize: 13),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _kv(String k, String v) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 4),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            SizedBox(
-                width: 110,
-                child: Text(k,
-                    style: const TextStyle(color: Colors.white38))),
-            Expanded(child: Text(v)),
-          ],
-        ),
-      );
-
   @override
   Widget build(BuildContext context) {
     return Scaffold(
@@ -218,7 +173,15 @@ class _DiscoveryPageState extends State<DiscoveryPage> {
                   subtitle: Text('${r.host}:${r.port}'
                       '${r.fingerprint.isEmpty ? '' : '\nfp ${r.fingerprint}'}'),
                   isThreeLine: r.fingerprint.isNotEmpty,
-                  onTap: () => _showDetails(r),
+                  trailing: const Icon(Icons.chevron_right),
+                  onTap: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute<void>(
+                          builder: (_) => CastPage(receiver: r)),
+                    );
+                    // Rescan after returning from a cast session.
+                    if (mounted) _scan();
+                  },
                 ),
               ),
             if (!_scanning && _receivers.isEmpty)
